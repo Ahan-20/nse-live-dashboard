@@ -110,34 +110,44 @@ def load(symbol):
             best[dt] = (o, h, l, c, v)
     bars = [{"dt": dt, "o": r[0], "h": r[1], "l": r[2], "c": r[3], "v": r[4]}
             for dt, r in sorted(best.items())]
-    return _adjust_corporate_actions(bars)
+    return _adjust_corporate_actions(bars, syms)
 
 
-def _adjust_corporate_actions(bars):
-    """Back-adjust for splits/bonuses. NSE bhavcopy is UNADJUSTED, so a 1:1
-    bonus shows as a fake ~50% overnight crash. We detect large clean gaps
-    (open vs previous close) and scale all earlier bars to the new price
-    basis, producing a continuous series like TradingView's adjusted data."""
-    n = len(bars)
-    if n < 2:
+_CA = None
+
+
+def _load_ca():
+    """Load NSE's official split/bonus list (built by corp_actions.py)."""
+    global _CA
+    if _CA is None:
+        try:
+            with open(os.path.join(_HERE, "corp_actions.json")) as f:
+                _CA = json.load(f)
+        except Exception:
+            _CA = {}
+    return _CA
+
+
+def _adjust_corporate_actions(bars, syms):
+    """Back-adjust for splits/bonuses using NSE's OFFICIAL corporate-actions
+    list — exact symbol, ex-date and ratio. Bhavcopy is unadjusted, so a 1:1
+    bonus shows as a fake ~50% crash; here every bar BEFORE an action's ex-date
+    is scaled by that action's factor (e.g. 1:1 bonus -> 0.5). Only stocks that
+    actually had an action are touched, on the exact date — no gap-guessing."""
+    ca = _load_ca()
+    actions = []
+    for s in syms:                       # include alias predecessors (e.g. ZOMATO)
+        for a in ca.get(s, []):
+            actions.append((a["ex_date"], a["factor"]))
+    if not actions or not bars:
         return bars
-    mult = [1.0] * n
-    running = 1.0
-    events = 0
-    for i in range(n - 1, 0, -1):
-        pc = bars[i - 1]["c"]
-        op = bars[i]["o"]
-        g = op / pc if pc > 0 else 1.0
-        if g < 0.70 or g > 1.43:        # >~30% clean gap = split/bonus, not a real move
-            running *= g
-            events += 1
-        mult[i - 1] = running
-    if events:
-        for i in range(n):
-            m = mult[i]
-            if m != 1.0:
-                b = bars[i]
-                b["o"] *= m; b["h"] *= m; b["l"] *= m; b["c"] *= m
+    for b in bars:
+        m = 1.0
+        for exd, f in actions:
+            if exd > b["dt"]:            # bar is before the ex-date -> scale it
+                m *= f
+        if m != 1.0:
+            b["o"] *= m; b["h"] *= m; b["l"] *= m; b["c"] *= m
     return bars
 
 
