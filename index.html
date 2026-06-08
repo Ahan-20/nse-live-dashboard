@@ -341,6 +341,7 @@
     <div class="tab" onclick="showTab('setup',this)">Setup Guide</div>
     <div class="tab" onclick="showTab('alerts',this)">Alert Conditions</div>
     <div class="tab" onclick="showTab('workflow',this)">Daily Workflow</div>
+    <div class="tab" onclick="showTab('backtest',this)" style="color:var(--gold)">🔬 Backtest (5Y)</div>
   </div>
 
   <!-- TAB: MAIN CODE -->
@@ -505,6 +506,27 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- TAB: BACKTEST -->
+  <div id="tab-backtest" class="code-block" style="display:none;padding:16px">
+    <div style="margin-bottom:12px">
+      <div style="color:var(--gold);font-size:12px;font-weight:700;letter-spacing:1px">200 EMA PULLBACK BACKTEST · 5 YEARS · DAILY</div>
+      <div style="color:var(--dim);font-size:10px;margin-top:3px;max-width:680px;line-height:1.55">
+        Trend filter on a rising/falling 200 EMA; enter on a pullback-and-reclaim of the 20 EMA in the trend direction.
+        Stop = ATR×1.5, target = 2R, risking 1% of equity per trade on a ₹1,00,000 start. Daily candles over 5 years,
+        ~500 most-liquid NSE stocks. Backtest ≠ future results.
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+      <input id="bt-symbol" placeholder="Stock symbol — e.g. RELIANCE"
+        style="background:#050a10;border:1px solid var(--border);color:#e2e8f0;padding:8px 12px;border-radius:5px;font-family:inherit;font-size:13px;width:240px;text-transform:uppercase"
+        onkeydown="if(event.key==='Enter')runBacktest()">
+      <button onclick="runBacktest()" style="background:var(--gold);color:#050a10;border:none;padding:8px 18px;border-radius:5px;font-weight:700;cursor:pointer;font-family:inherit;font-size:12px;letter-spacing:.5px">RUN ▶</button>
+      <span id="bt-status" style="font-size:11px;color:var(--dim)"></span>
+    </div>
+    <div id="bt-chips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px"></div>
+    <div id="bt-results"></div>
   </div>
 </div>
 
@@ -911,10 +933,94 @@ const pineCode = `<span class="c-comment">// ═══════════�
 function showTab(name, el){
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
-  ['main','setup','alerts','workflow'].forEach(id=>{
+  ['main','setup','alerts','workflow','backtest'].forEach(id=>{
     const el2 = document.getElementById('tab-'+id);
     if(el2) el2.style.display = id===name ? 'block' : 'none';
   });
+}
+
+// ─── BACKTEST ────────────────────────────────────────────────────
+const BT_EXAMPLES = ['RELIANCE','HDFCBANK','INFY','TATAMOTORS','SBIN','TATASTEEL','ITC','SUNPHARMA'];
+function initBtChips(){
+  const box = document.getElementById('bt-chips');
+  if(!box) return;
+  box.innerHTML = BT_EXAMPLES.map(s=>`<span onclick="btChip('${s}')" style="cursor:pointer;font-size:10px;padding:3px 9px;border-radius:3px;background:#1a2744;color:#a0aec0;border:1px solid #1e3050">${s}</span>`).join('');
+}
+function btChip(s){ document.getElementById('bt-symbol').value = s; runBacktest(); }
+
+async function runBacktest(){
+  const sym = (document.getElementById('bt-symbol').value||'').trim().toUpperCase();
+  const status = document.getElementById('bt-status');
+  const out = document.getElementById('bt-results');
+  if(!sym){ status.textContent='Enter a symbol.'; return; }
+  status.textContent='Running 5-year backtest…'; status.style.color='var(--amber)';
+  out.innerHTML='';
+  try{
+    const r = await fetch('/api/backtest?symbol='+encodeURIComponent(sym), {cache:'no-store'});
+    const d = await r.json();
+    if(!d.ok){ status.textContent=d.error||'Failed.'; status.style.color='var(--red)'; return; }
+    status.textContent=''; renderBacktest(d);
+  }catch(e){ status.textContent='Error: '+e.message; status.style.color='var(--red)'; }
+}
+
+function renderBacktest(d){
+  const pos = v => v>=0 ? 'var(--green)' : 'var(--red)';
+  const inr = n => '₹'+Number(n).toLocaleString('en-IN');
+  const card = (label,val,col) => `<div style="background:#0a1420;border:1px solid var(--border);border-radius:6px;padding:9px 11px">
+      <div style="font-size:9px;color:var(--dim);letter-spacing:.5px;text-transform:uppercase">${label}</div>
+      <div style="font-size:16px;font-weight:700;color:${col||'#e2e8f0'};margin-top:3px">${val}</div></div>`;
+
+  const cards = [
+    card('Return on capital', d.return_pct+'%', pos(d.return_pct)),
+    card('Net P&L', inr(d.net_pnl), pos(d.net_pnl)),
+    card('Trades', d.trades),
+    card('Win rate', d.win_rate+'%', d.win_rate>=50?'var(--green)':'var(--amber)'),
+    card('Wins / Losses', d.wins+' / '+d.losses),
+    card('Long / Short', d.longs+' / '+d.shorts),
+    card('Profit factor', d.profit_factor, d.profit_factor>=1?'var(--green)':'var(--red)'),
+    card('Avg R / trade', d.avg_r, pos(d.avg_r)),
+    card('Expectancy', inr(d.expectancy), pos(d.expectancy)),
+    card('Avg win / loss', inr(d.avg_win)+' / '+inr(d.avg_loss)),
+    card('Max drawdown', d.max_drawdown_pct+'%', 'var(--red)'),
+    card('Best / Worst', inr(d.best_trade)+' / '+inr(d.worst_trade)),
+  ].join('');
+
+  // equity curve sparkline
+  const eq = d.equity_curve.map(p=>p.eq);
+  const mn=Math.min(...eq), mx=Math.max(...eq), W=620, H=90;
+  const pts = eq.map((v,i)=>{
+    const x = eq.length>1 ? (i/(eq.length-1))*W : 0;
+    const y = mx>mn ? H-((v-mn)/(mx-mn))*H : H/2;
+    return x.toFixed(1)+','+y.toFixed(1);
+  }).join(' ');
+  const endCol = eq[eq.length-1]>=d.capital ? 'var(--green)':'var(--red)';
+  const curve = `<div style="background:#0a1420;border:1px solid var(--border);border-radius:6px;padding:10px;margin-top:10px">
+      <div style="font-size:9px;color:var(--dim);letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px">Equity curve · start ${inr(d.capital)} → end ${inr(d.final_equity)}</div>
+      <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none">
+        <polyline points="${pts}" fill="none" stroke="${endCol}" stroke-width="1.5"/>
+      </svg></div>`;
+
+  const rows = d.trade_list.slice().reverse().map((t,i)=>{
+    const dc = t.dir==='long'?'var(--green)':'var(--red)';
+    return `<tr>
+      <td style="color:var(--dim)">${d.trade_list.length-i}</td>
+      <td>${t.entry_dt}</td>
+      <td style="color:${dc};font-weight:700">${t.dir.toUpperCase()}</td>
+      <td>${t.entry}</td><td>${t.exit}</td>
+      <td style="color:${pos(t.pnl)};text-align:right">${inr(t.pnl)}</td>
+      <td style="color:${pos(t.r)};text-align:right">${t.r}R</td>
+      <td style="color:var(--dim)">${t.reason}</td></tr>`;
+  }).join('');
+  const table = `<div style="margin-top:12px;max-height:260px;overflow:auto;border:1px solid var(--border);border-radius:6px">
+    <table class="matrix" style="width:100%">
+      <thead><tr><th>#</th><th>Entry date</th><th>Dir</th><th>Entry</th><th>Exit</th><th style="text-align:right">P&L</th><th style="text-align:right">R</th><th>Exit</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
+
+  document.getElementById('bt-results').innerHTML =
+    `<div style="font-size:13px;font-weight:700;color:#e2e8f0;margin-bottom:8px">${d.symbol}
+       <span style="font-size:10px;color:var(--dim);font-weight:400">· ${d.period.from} → ${d.period.to} · ${d.period.bars} daily bars</span></div>
+     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px">${cards}</div>
+     ${curve}${table}`;
 }
 
 function copyCode(tabId){
@@ -939,6 +1045,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
   renderStocks();
   renderAlerts();
   document.getElementById('code-main').innerHTML = pineCode;
+  initBtChips();
 
   // Real live data from the local NSE proxy (server.py)
   refreshLive();

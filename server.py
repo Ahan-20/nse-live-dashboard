@@ -27,6 +27,8 @@ import http.cookiejar
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import backtest as bt
+
 PORT = int(os.environ.get("PORT", 8787))   # Railway injects PORT
 HOST = "0.0.0.0" if os.environ.get("PORT") else "127.0.0.1"
 NSE = "https://www.nseindia.com"
@@ -233,6 +235,18 @@ def cached_dashboard():
                 "gainers": [], "losers": [], "movers": []}
 
 
+# ── backtest cache (results are deterministic per symbol) ────────────
+_bt_cache = {}
+
+
+def cached_backtest(symbol):
+    if symbol in _bt_cache:
+        return _bt_cache[symbol]
+    rep = bt.run_backtest(symbol)
+    _bt_cache[symbol] = rep
+    return rep
+
+
 # ── HTTP server ──────────────────────────────────────────────────────
 class Handler(BaseHTTPRequestHandler):
     def _send(self, code, body, ctype):
@@ -247,6 +261,17 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/api/dashboard"):
             body = json.dumps(cached_dashboard()).encode("utf-8")
             return self._send(200, body, "application/json")
+        if self.path.startswith("/api/backtest"):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            sym = (q.get("symbol", [""])[0] or "").strip().upper()
+            if not sym:
+                return self._send(400, b'{"ok":false,"error":"missing symbol"}',
+                                  "application/json")
+            try:
+                rep = cached_backtest(sym)
+            except Exception as e:
+                rep = {"ok": False, "error": str(e)}
+            return self._send(200, json.dumps(rep).encode("utf-8"), "application/json")
         if self.path in ("/", "/index.html"):
             try:
                 body = (HERE / "index.html").read_bytes()
