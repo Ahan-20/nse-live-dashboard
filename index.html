@@ -531,6 +531,7 @@
         style="background:#050a10;border:1px solid var(--border);color:#e2e8f0;padding:8px 12px;border-radius:5px;font-family:inherit;font-size:13px;width:200px;text-transform:uppercase"
         onkeydown="if(event.key==='Enter')runBacktest()">
       <button onclick="runBacktest()" style="background:var(--gold);color:#050a10;border:none;padding:8px 18px;border-radius:5px;font-weight:700;cursor:pointer;font-family:inherit;font-size:12px;letter-spacing:.5px">RUN ▶</button>
+      <button onclick="runLeaderboard()" style="background:#1a2744;color:var(--cyan);border:1px solid var(--cyan);padding:8px 14px;border-radius:5px;font-weight:700;cursor:pointer;font-family:inherit;font-size:12px;letter-spacing:.5px">📊 ALL NIFTY 50</button>
       <span id="bt-status" style="font-size:11px;color:var(--dim)"></span>
     </div>
     <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px;padding:10px 12px;background:#0a1420;border:1px solid var(--border);border-radius:6px">
@@ -977,6 +978,54 @@ function initBtChips(){
 }
 function btChip(s){ document.getElementById('bt-symbol').value = s; runBacktest(); }
 
+function btParams(){
+  const g = id => document.getElementById(id);
+  return new URLSearchParams({
+    strategy:g('bt-strategy').value, exit:g('bt-exit').value, direction:g('bt-direction').value,
+    capital:g('bt-capital').value||100000, risk:g('bt-risk').value||1,
+    sl:g('bt-sl').value||1.5, rr:g('bt-rr').value||2 });
+}
+
+async function runLeaderboard(){
+  const status = document.getElementById('bt-status');
+  const out = document.getElementById('bt-results');
+  status.textContent='Backtesting all 50 NIFTY stocks…'; status.style.color='var(--amber)';
+  out.innerHTML='';
+  try{
+    const r = await fetch('/api/leaderboard?'+btParams().toString(), {cache:'no-store'});
+    const d = await r.json();
+    status.textContent=''; renderLeaderboard(d);
+  }catch(e){ status.textContent='Error: '+e.message; status.style.color='var(--red)'; }
+}
+
+function renderLeaderboard(d){
+  const pos = v => (v==null)?'var(--dim)':(v>=0?'var(--green)':'var(--red)');
+  const cf = d.config||{};
+  const beat = d.rows.filter(r=>r.vs_buyhold!=null && r.vs_buyhold>0).length;
+  const profit = d.rows.filter(r=>r.return_pct!=null && r.return_pct>0).length;
+  const cfgLine = cf.strategy ? `${cf.strategy} · exit: ${cf.exit} · ${cf.direction} · ${cf.risk_pct}% risk · SL ${cf.sl_atr}×ATR · ${cf.rr}R` : '';
+  const rows = d.rows.map((r,i)=>{
+    if(r.skip) return `<tr><td style="color:var(--dim)">${i+1}</td><td>${r.symbol}</td><td colspan="7" style="color:var(--dim)">— too new / no data —</td></tr>`;
+    return `<tr style="cursor:pointer" onclick="btChip('${r.symbol}')">
+      <td style="color:var(--dim)">${i+1}</td>
+      <td style="font-weight:700;color:#e2e8f0">${r.symbol}</td>
+      <td style="text-align:right;color:${pos(r.return_pct)};font-weight:700">${r.return_pct}%</td>
+      <td style="text-align:right;color:${pos(r.buyhold_return_pct)}">${r.buyhold_return_pct}%</td>
+      <td style="text-align:right;color:${pos(r.vs_buyhold)};font-weight:700">${r.vs_buyhold>=0?'+':''}${r.vs_buyhold}%</td>
+      <td style="text-align:right">${r.win_rate}%</td>
+      <td style="text-align:right">${r.trades}</td>
+      <td style="text-align:right;color:${r.profit_factor>=1?'var(--green)':'var(--red)'}">${r.profit_factor}</td>
+      <td style="text-align:right;color:var(--red)">${r.max_drawdown_pct}%</td></tr>`;
+  }).join('');
+  document.getElementById('bt-results').innerHTML =
+    `<div style="font-size:13px;font-weight:700;color:var(--cyan);margin-bottom:4px">NIFTY 50 Leaderboard <span style="font-size:10px;color:var(--dim);font-weight:400">· ranked by return · click a row to drill in</span></div>
+     <div style="font-size:10px;color:var(--dim);margin-bottom:8px">${cfgLine}<br>${profit}/50 profitable · ${beat}/50 beat buy-&-hold</div>
+     <div style="max-height:520px;overflow:auto;border:1px solid var(--border);border-radius:6px">
+       <table class="matrix" style="width:100%">
+         <thead><tr><th>#</th><th>Stock</th><th style="text-align:right">Return</th><th style="text-align:right">Buy&Hold</th><th style="text-align:right">vs B&H</th><th style="text-align:right">Win%</th><th style="text-align:right">Trades</th><th style="text-align:right">PF</th><th style="text-align:right">MaxDD</th></tr></thead>
+         <tbody>${rows}</tbody></table></div>`;
+}
+
 async function runBacktest(){
   const sym = (document.getElementById('bt-symbol').value||'').trim().toUpperCase();
   const status = document.getElementById('bt-status');
@@ -1012,6 +1061,8 @@ function renderBacktest(d){
 
   const cards = [
     card('Return on capital', d.return_pct+'%', pos(d.return_pct)),
+    card('Buy & Hold return', d.buyhold_return_pct+'%', pos(d.buyhold_return_pct)),
+    card('Strategy vs B&H', (d.vs_buyhold>=0?'+':'')+d.vs_buyhold+'%', pos(d.vs_buyhold)),
     card('Net P&L', inr(d.net_pnl), pos(d.net_pnl)),
     card('Trades', d.trades),
     card('Win rate', d.win_rate+'%', d.win_rate>=50?'var(--green)':'var(--amber)'),

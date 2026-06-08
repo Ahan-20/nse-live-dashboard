@@ -235,6 +235,16 @@ def cached_dashboard():
                 "gainers": [], "losers": [], "movers": []}
 
 
+NIFTY50 = ["ADANIENT", "ADANIPORTS", "APOLLOHOSP", "ASIANPAINT", "AXISBANK",
+           "BAJAJ-AUTO", "BAJFINANCE", "BAJAJFINSV", "BEL", "BHARTIARTL", "CIPLA",
+           "COALINDIA", "DRREDDY", "EICHERMOT", "ETERNAL", "GRASIM", "HCLTECH",
+           "HDFCBANK", "HDFCLIFE", "HINDALCO", "HINDUNILVR", "ICICIBANK", "ITC",
+           "INFY", "INDIGO", "JSWSTEEL", "JIOFIN", "KOTAKBANK", "LT", "M&M",
+           "MARUTI", "MAXHEALTH", "NTPC", "NESTLEIND", "ONGC", "POWERGRID",
+           "RELIANCE", "SBILIFE", "SHRIRAMFIN", "SBIN", "SUNPHARMA", "TCS",
+           "TATACONSUM", "TMPV", "TATASTEEL", "TECHM", "TITAN", "TRENT",
+           "ULTRACEMCO", "WIPRO"]
+
 # ── backtest cache (deterministic per symbol + parameter set) ────────
 _bt_cache = {}
 
@@ -299,6 +309,26 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 rep = {"ok": False, "error": str(e)}
             return self._send(200, json.dumps(rep).encode("utf-8"), "application/json")
+        if self.path.startswith("/api/leaderboard"):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            rows, config = [], None
+            for sym in NIFTY50:
+                try:
+                    r = cached_backtest(sym, q)
+                except Exception:
+                    r = {"ok": False}
+                if r.get("ok"):
+                    config = config or r.get("config")
+                    rows.append({k: r.get(k) for k in (
+                        "symbol", "trades", "win_rate", "return_pct",
+                        "buyhold_return_pct", "vs_buyhold", "profit_factor",
+                        "max_drawdown_pct")})
+                else:
+                    rows.append({"symbol": sym, "skip": True})
+            rows.sort(key=lambda x: (x.get("return_pct") if x.get("return_pct")
+                                     is not None else -1e9), reverse=True)
+            body = json.dumps({"ok": True, "rows": rows, "config": config})
+            return self._send(200, body.encode("utf-8"), "application/json")
         if self.path in ("/", "/index.html"):
             try:
                 body = (HERE / "index.html").read_bytes()

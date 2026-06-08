@@ -383,13 +383,20 @@ def _report(symbol, bars, trades, capital, equity, maxdd, eq_curve):
         d = by_type.setdefault(t["type"], {"n": 0, "win": 0, "pnl": 0.0})
         d["n"] += 1; d["win"] += 1 if t["pnl"] > 0 else 0; d["pnl"] += t["pnl"]
 
+    # Buy & hold benchmark over the same (adjusted) period.
+    bh_ret = (bars[-1]["c"] / bars[0]["c"] - 1) if bars[0]["c"] else 0.0
+    strat_ret = (equity - capital) / capital
+
     def pct(x): return round(x * 100, 1)
     return {
         "ok": True, "symbol": symbol.upper(),
         "period": {"from": bars[0]["dt"], "to": bars[-1]["dt"], "bars": len(bars)},
         "capital": capital, "final_equity": round(equity, 2),
         "net_pnl": round(equity - capital, 2),
-        "return_pct": pct((equity - capital) / capital),
+        "return_pct": pct(strat_ret),
+        "buyhold_return_pct": pct(bh_ret),
+        "buyhold_final": round(capital * (1 + bh_ret), 2),
+        "vs_buyhold": pct(strat_ret - bh_ret),
         "trades": nt,
         "longs": len(longs), "shorts": len(shorts),
         "wins": len(wins), "losses": len(losses),
