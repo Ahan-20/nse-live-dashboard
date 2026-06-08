@@ -235,16 +235,43 @@ def cached_dashboard():
                 "gainers": [], "losers": [], "movers": []}
 
 
-# ── backtest cache (results are deterministic per symbol) ────────────
+# ── backtest cache (deterministic per symbol + parameter set) ────────
 _bt_cache = {}
 
 
-def cached_backtest(symbol):
-    if symbol in _bt_cache:
-        return _bt_cache[symbol]
-    rep = bt.run_backtest(symbol)
-    _bt_cache[symbol] = rep
-    return rep
+def _num(q, key, default, lo, hi):
+    try:
+        return max(lo, min(hi, float(q.get(key, [default])[0])))
+    except (ValueError, TypeError):
+        return default
+
+
+def cached_backtest(symbol, q):
+    mode = "ema200" if q.get("strategy", [""])[0] == "pullback" else "ema200cross"
+    exit_mode = q.get("exit", ["cross"])[0]
+    if exit_mode not in ("cross", "sltp", "either"):
+        exit_mode = "cross"
+    direction = q.get("direction", ["both"])[0]
+    if direction not in ("both", "long", "short"):
+        direction = "both"
+    params = dict(mode=mode, exit_mode=exit_mode, direction=direction,
+                  capital=_num(q, "capital", 100000, 1000, 1e9),
+                  risk_pct=_num(q, "risk", 1.0, 0.1, 100) / 100.0,
+                  sl_atr=_num(q, "sl", 1.5, 0.1, 20),
+                  rr=_num(q, "rr", 2.0, 0.1, 50))
+    key = (symbol,) + tuple(sorted(params.items()))
+    if key not in _bt_cache:
+        rep = bt.run_backtest(symbol, **params)
+        if rep.get("ok"):
+            rep["config"] = {
+                "strategy": "200 EMA Cross" if mode == "ema200cross" else "20 EMA Pullback",
+                "exit": {"cross": "Opposite 200 EMA cross", "sltp": "ATR stop + target",
+                         "either": "Stop/target or cross"}[exit_mode],
+                "direction": direction, "capital": params["capital"],
+                "risk_pct": round(params["risk_pct"] * 100, 2),
+                "sl_atr": params["sl_atr"], "rr": params["rr"]}
+        _bt_cache[key] = rep
+    return _bt_cache[key]
 
 
 # ── HTTP server ──────────────────────────────────────────────────────
@@ -268,7 +295,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, b'{"ok":false,"error":"missing symbol"}',
                                   "application/json")
             try:
-                rep = cached_backtest(sym)
+                rep = cached_backtest(sym, q)
             except Exception as e:
                 rep = {"ok": False, "error": str(e)}
             return self._send(200, json.dumps(rep).encode("utf-8"), "application/json")

@@ -147,7 +147,8 @@ def weekly_htf_bull_bear(bars):
 # ── strategy + simulation ────────────────────────────────────────────
 def run_backtest(symbol, capital=100000.0, risk_pct=0.01, rr=2.0, sl_atr=1.5,
                  vol_conf=2.0, vol_early=1.4, require_retest=False,
-                 pivot_lb=8, max_hold=60, mode="ema200"):
+                 pivot_lb=8, max_hold=60, mode="ema200cross",
+                 exit_mode="cross", direction="both"):
     bars = load(symbol)
     if not bars:
         return {"ok": False, "error": f"'{symbol.upper()}' isn't in the dataset. "
@@ -208,7 +209,18 @@ def run_backtest(symbol, capital=100000.0, risk_pct=0.01, rr=2.0, sl_atr=1.5,
         else:
             armed_long = armed_short = False
 
+    # ── 200 EMA CROSS strategy (the pasted script): long when close crosses
+    # above the 200 EMA, short when it crosses below. ──
+    sig_cross = [(None, None)] * n
+    for i in range(200, n):
+        if c[i] > e200[i] and c[i - 1] <= e200[i - 1]:
+            sig_cross[i] = ("long", "200 EMA Cross")
+        elif c[i] < e200[i] and c[i - 1] >= e200[i - 1]:
+            sig_cross[i] = ("short", "200 EMA Cross")
+
     def sig(i):
+        if mode == "ema200cross":
+            return sig_cross[i]
         if mode == "ema200":
             return sig_e200[i]
         if i < 200 or vsma[i] == 0:
@@ -262,7 +274,12 @@ def run_backtest(symbol, capital=100000.0, risk_pct=0.01, rr=2.0, sl_atr=1.5,
         if early_short:return "short", "Early Short"
         return None, None
 
-    # simulate: signal on close of i -> enter at open of i+1; SL/TP intrabar
+    # simulate: signal on close of i -> enter at open of i+1.
+    #   exit_mode "sltp"  -> ATR stop / RR target (intrabar)
+    #   exit_mode "cross" -> opposite 200 EMA cross (at that bar's close)
+    #   exit_mode "either"-> whichever happens first
+    use_sltp = exit_mode in ("sltp", "either")
+    use_cross = exit_mode in ("cross", "either")
     equity = capital
     peak = capital
     maxdd = 0.0
@@ -270,49 +287,56 @@ def run_backtest(symbol, capital=100000.0, risk_pct=0.01, rr=2.0, sl_atr=1.5,
     eq_curve = [{"dt": bars[0]["dt"], "eq": capital}]
     i = 200
     while i < n - 1:
-        direction, label = sig(i)
-        if not direction:
+        d, label = sig(i)
+        if not d or (direction != "both" and d != direction):
             i += 1; continue
         entry = o[i + 1]
         risk_ps = av[i] * sl_atr
         if risk_ps <= 0:
             i += 1; continue
-        if direction == "long":
+        if d == "long":
             sl = entry - risk_ps; tp = entry + risk_ps * rr
         else:
             sl = entry + risk_ps; tp = entry - risk_ps * rr
         qty = math.floor((risk_pct * equity) / risk_ps)
         if qty < 1:
             qty = 1
-        # walk forward to exit
         exit_px = exit_dt = reason = None
         j = i + 1
-        while j < n and (j - (i + 1)) <= max_hold:
+        while j < n:
             hi, lo = h[j], l[j]
-            if direction == "long":
-                if lo <= sl: exit_px, reason = sl, "SL";
-                elif hi >= tp: exit_px, reason = tp, "TP"
-            else:
-                if hi >= sl: exit_px, reason = sl, "SL"
-                elif lo <= tp: exit_px, reason = tp, "TP"
+            if use_sltp:
+                if d == "long":
+                    if lo <= sl: exit_px, reason = sl, "SL"
+                    elif hi >= tp: exit_px, reason = tp, "TP"
+                else:
+                    if hi >= sl: exit_px, reason = sl, "SL"
+                    elif lo <= tp: exit_px, reason = tp, "TP"
+            if exit_px is None and use_cross and j > 0:
+                if d == "long" and c[j] < e200[j] and c[j - 1] >= e200[j - 1]:
+                    exit_px, reason = c[j], "Cross"
+                elif d == "short" and c[j] > e200[j] and c[j - 1] <= e200[j - 1]:
+                    exit_px, reason = c[j], "Cross"
+            if exit_px is None and not use_cross and (j - (i + 1)) >= max_hold:
+                exit_px, reason = c[j], "Time"      # safety cap (sltp-only mode)
             if exit_px is not None:
                 exit_dt = bars[j]["dt"]; break
             j += 1
-        if exit_px is None:                      # timed out -> exit at last close
-            j = min(n - 1, i + 1 + max_hold)
-            exit_px, reason, exit_dt = c[j], "Time", bars[j]["dt"]
-        pnl = qty * (exit_px - entry) * (1 if direction == "long" else -1)
+        if exit_px is None:                          # ran to end of data
+            j = n - 1
+            exit_px, reason, exit_dt = c[j], "End", bars[j]["dt"]
+        pnl = qty * (exit_px - entry) * (1 if d == "long" else -1)
         equity += pnl
         peak = max(peak, equity)
         maxdd = max(maxdd, (peak - equity) / peak)
         r_mult = pnl / (qty * risk_ps) if qty * risk_ps else 0
         trades.append({"entry_dt": bars[i + 1]["dt"], "exit_dt": exit_dt,
-                       "dir": direction, "type": label, "entry": round(entry, 2),
+                       "dir": d, "type": label, "entry": round(entry, 2),
                        "exit": round(exit_px, 2), "sl": round(sl, 2), "tp": round(tp, 2),
                        "qty": qty, "pnl": round(pnl, 2), "r": round(r_mult, 2),
                        "reason": reason, "bars_held": j - (i + 1)})
         eq_curve.append({"dt": exit_dt, "eq": round(equity, 2)})
-        i = j + 1                                # flat until trade closes, then continue
+        i = j      # re-evaluate the exit bar so an opposite cross can reverse
 
     return _report(symbol, bars, trades, capital, equity, maxdd, eq_curve)
 

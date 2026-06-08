@@ -150,6 +150,9 @@
   .check{color:var(--green);font-weight:700}
   .cross{color:var(--red);font-weight:700}
   .wait{color:var(--amber);font-weight:700}
+  .bt-field{display:flex;flex-direction:column;gap:3px;font-size:9px;color:var(--dim);letter-spacing:.5px;text-transform:uppercase;font-weight:700}
+  .bt-field select,.bt-field input{background:#050a10;border:1px solid var(--border);color:#e2e8f0;padding:6px 8px;border-radius:4px;font-family:inherit;font-size:12px;text-transform:none;font-weight:400}
+  .bt-field input{width:108px}
 </style>
 </head>
 <body>
@@ -511,11 +514,11 @@
   <!-- TAB: BACKTEST -->
   <div id="tab-backtest" class="code-block" style="display:none;padding:16px">
     <div style="margin-bottom:12px">
-      <div style="color:var(--gold);font-size:12px;font-weight:700;letter-spacing:1px">200 EMA PULLBACK BACKTEST · 5 YEARS · DAILY</div>
-      <div style="color:var(--dim);font-size:10px;margin-top:3px;max-width:680px;line-height:1.55">
-        Trend filter on a rising/falling 200 EMA; enter on a pullback-and-reclaim of the 20 EMA in the trend direction.
-        Stop = ATR×1.5, target = 2R, risking 1% of equity per trade on a ₹1,00,000 start. Daily candles over 5 years,
-        ~500 most-liquid NSE stocks. Backtest ≠ future results.
+      <div style="color:var(--gold);font-size:12px;font-weight:700;letter-spacing:1px">200 EMA STRATEGY BACKTEST · 5 YEARS · DAILY</div>
+      <div style="color:var(--dim);font-size:10px;margin-top:3px;max-width:720px;line-height:1.55">
+        <b>200 EMA Cross</b>: long when price closes above the 200 EMA, short when it closes below.
+        Configure exits, risk and capital below, then run. Daily candles over 5 years, ~500 most-liquid NSE
+        stocks (all of NIFTY 50). Backtest ≠ future results.
       </div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
@@ -529,6 +532,23 @@
         onkeydown="if(event.key==='Enter')runBacktest()">
       <button onclick="runBacktest()" style="background:var(--gold);color:#050a10;border:none;padding:8px 18px;border-radius:5px;font-weight:700;cursor:pointer;font-family:inherit;font-size:12px;letter-spacing:.5px">RUN ▶</button>
       <span id="bt-status" style="font-size:11px;color:var(--dim)"></span>
+    </div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px;padding:10px 12px;background:#0a1420;border:1px solid var(--border);border-radius:6px">
+      <label class="bt-field">Strategy<select id="bt-strategy">
+        <option value="cross">200 EMA Cross</option>
+        <option value="pullback">20 EMA Pullback</option></select></label>
+      <label class="bt-field">Exit on<select id="bt-exit">
+        <option value="cross">Opposite 200 EMA cross</option>
+        <option value="sltp">ATR stop + R:R target</option>
+        <option value="either">Either, whichever first</option></select></label>
+      <label class="bt-field">Direction<select id="bt-direction">
+        <option value="both">Long + Short</option>
+        <option value="long">Long only</option>
+        <option value="short">Short only</option></select></label>
+      <label class="bt-field">Capital ₹<input id="bt-capital" type="number" value="100000" min="1000" step="10000"></label>
+      <label class="bt-field">Risk %/trade<input id="bt-risk" type="number" value="1" min="0.1" step="0.1"></label>
+      <label class="bt-field">SL × ATR<input id="bt-sl" type="number" value="1.5" min="0.1" step="0.1"></label>
+      <label class="bt-field">Target (R:R)<input id="bt-rr" type="number" value="2" min="0.1" step="0.5"></label>
     </div>
     <div id="bt-chips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px"></div>
     <div id="bt-results"></div>
@@ -964,8 +984,19 @@ async function runBacktest(){
   if(!sym){ status.textContent='Enter a symbol.'; return; }
   status.textContent='Running 5-year backtest…'; status.style.color='var(--amber)';
   out.innerHTML='';
+  const g = id => document.getElementById(id);
+  const qs = new URLSearchParams({
+    symbol: sym,
+    strategy: g('bt-strategy').value,
+    exit: g('bt-exit').value,
+    direction: g('bt-direction').value,
+    capital: g('bt-capital').value || 100000,
+    risk: g('bt-risk').value || 1,
+    sl: g('bt-sl').value || 1.5,
+    rr: g('bt-rr').value || 2,
+  });
   try{
-    const r = await fetch('/api/backtest?symbol='+encodeURIComponent(sym), {cache:'no-store'});
+    const r = await fetch('/api/backtest?'+qs.toString(), {cache:'no-store'});
     const d = await r.json();
     if(!d.ok){ status.textContent=d.error||'Failed.'; status.style.color='var(--red)'; return; }
     status.textContent=''; renderBacktest(d);
@@ -1025,9 +1056,13 @@ function renderBacktest(d){
       <thead><tr><th>#</th><th>Entry date</th><th>Dir</th><th>Entry</th><th>Exit</th><th style="text-align:right">P&L</th><th style="text-align:right">R</th><th>Exit</th></tr></thead>
       <tbody>${rows}</tbody></table></div>`;
 
+  const cf = d.config || {};
+  const cfgLine = cf.strategy ? `<div style="font-size:10px;color:var(--dim);margin-bottom:10px">
+      ${cf.strategy} · exit: ${cf.exit} · ${cf.direction} · ₹${Number(cf.capital).toLocaleString('en-IN')} start · ${cf.risk_pct}% risk/trade · SL ${cf.sl_atr}×ATR · ${cf.rr}R target</div>` : '';
   document.getElementById('bt-results').innerHTML =
-    `<div style="font-size:13px;font-weight:700;color:#e2e8f0;margin-bottom:8px">${d.symbol}
+    `<div style="font-size:13px;font-weight:700;color:#e2e8f0;margin-bottom:4px">${d.symbol}
        <span style="font-size:10px;color:var(--dim);font-weight:400">· ${d.period.from} → ${d.period.to} · ${d.period.bars} daily bars</span></div>
+     ${cfgLine}
      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px">${cards}</div>
      ${curve}${table}`;
 }
