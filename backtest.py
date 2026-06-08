@@ -319,12 +319,23 @@ def run_backtest(symbol, capital=100000.0, risk_pct=0.01, rr=2.0, sl_atr=1.5,
     #   exit_mode "either"-> whichever happens first
     use_sltp = exit_mode in ("sltp", "either")
     use_cross = exit_mode in ("cross", "either")
+
+    # Report/trade only the last 5 years; earlier bars are EMA-200 warm-up so the
+    # signal is valid from day 1 of the window (matching a TradingView chart).
+    last = datetime.date.fromisoformat(bars[-1]["dt"])
+    try:
+        cutoff = last.replace(year=last.year - 5).isoformat()
+    except ValueError:
+        cutoff = last.replace(year=last.year - 5, day=28).isoformat()
+    w = next((idx for idx, b in enumerate(bars) if b["dt"] >= cutoff), 0)
+    start = max(200, w)
+
     equity = capital
     peak = capital
     maxdd = 0.0
     trades = []
-    eq_curve = [{"dt": bars[0]["dt"], "eq": capital}]
-    i = 200
+    eq_curve = [{"dt": bars[start]["dt"], "eq": capital}]
+    i = start
     while i < n - 1:
         d, label = sig(i)
         if not d or (direction != "both" and d != direction):
@@ -377,10 +388,26 @@ def run_backtest(symbol, capital=100000.0, risk_pct=0.01, rr=2.0, sl_atr=1.5,
         eq_curve.append({"dt": exit_dt, "eq": round(equity, 2)})
         i = j      # re-evaluate the exit bar so an opposite cross can reverse
 
-    return _report(symbol, bars, trades, capital, equity, maxdd, eq_curve)
+    # Chart data over the 5-year window: price, 200 EMA, and every cross /
+    # near-EMA marker (exactly what the Pine script draws).
+    marks = []
+    for idx in range(start, n):
+        if c[idx] > e200[idx] and c[idx - 1] <= e200[idx - 1]:
+            marks.append({"dt": bars[idx]["dt"], "px": round(c[idx], 2), "t": "B"})
+        elif c[idx] < e200[idx] and c[idx - 1] >= e200[idx - 1]:
+            marks.append({"dt": bars[idx]["dt"], "px": round(c[idx], 2), "t": "S"})
+        if e200[idx] and abs(c[idx] - e200[idx]) / e200[idx] < 0.01:
+            marks.append({"dt": bars[idx]["dt"], "px": round(c[idx], 2), "t": "N"})
+    chart = {"dt": [bars[k]["dt"] for k in range(start, n)],
+             "close": [round(c[k], 2) for k in range(start, n)],
+             "ema200": [round(e200[k], 2) for k in range(start, n)],
+             "marks": marks}
+
+    return _report(symbol, bars, trades, capital, equity, maxdd, eq_curve, start, chart)
 
 
-def _report(symbol, bars, trades, capital, equity, maxdd, eq_curve):
+def _report(symbol, bars, trades, capital, equity, maxdd, eq_curve, start=0, chart=None):
+    window = bars[start:]                       # the reported 5-year window
     wins = [t for t in trades if t["pnl"] > 0]
     losses = [t for t in trades if t["pnl"] <= 0]
     longs = [t for t in trades if t["dir"] == "long"]
@@ -393,14 +420,15 @@ def _report(symbol, bars, trades, capital, equity, maxdd, eq_curve):
         d = by_type.setdefault(t["type"], {"n": 0, "win": 0, "pnl": 0.0})
         d["n"] += 1; d["win"] += 1 if t["pnl"] > 0 else 0; d["pnl"] += t["pnl"]
 
-    # Buy & hold benchmark over the same (adjusted) period.
-    bh_ret = (bars[-1]["c"] / bars[0]["c"] - 1) if bars[0]["c"] else 0.0
+    # Buy & hold benchmark over the same (adjusted) reported window.
+    bh_ret = (window[-1]["c"] / window[0]["c"] - 1) if window[0]["c"] else 0.0
     strat_ret = (equity - capital) / capital
 
     def pct(x): return round(x * 100, 1)
     return {
         "ok": True, "symbol": symbol.upper(),
-        "period": {"from": bars[0]["dt"], "to": bars[-1]["dt"], "bars": len(bars)},
+        "period": {"from": window[0]["dt"], "to": window[-1]["dt"], "bars": len(window)},
+        "chart": chart,
         "capital": capital, "final_equity": round(equity, 2),
         "net_pnl": round(equity - capital, 2),
         "return_pct": pct(strat_ret),

@@ -1149,6 +1149,35 @@ function renderBacktest(d){
       <thead><tr><th>#</th><th>Entry date</th><th>Dir</th><th>Entry</th><th>Exit</th><th style="text-align:right">P&L</th><th style="text-align:right">R</th><th>Exit</th></tr></thead>
       <tbody>${rows}</tbody></table></div>`;
 
+  // Price + 200 EMA + cross markers (visual of your Pine script over 5 years)
+  let priceChart = '';
+  const ch = d.chart;
+  if(ch && ch.dt && ch.dt.length){
+    const CW=1000, CH=300, n=ch.dt.length;
+    const vals = ch.close.concat(ch.ema200).filter(v=>v!=null);
+    const lo=Math.min(...vals), hi=Math.max(...vals);
+    const X = k => n>1 ? (k/(n-1))*CW : 0;
+    const Y = v => hi>lo ? CH-((v-lo)/(hi-lo))*CH : CH/2;
+    const line = arr => arr.map((v,k)=>X(k).toFixed(1)+','+Y(v).toFixed(1)).join(' ');
+    const idxOf = {}; ch.dt.forEach((dt,k)=>idxOf[dt]=k);
+    const marks = ch.marks.map(m=>{
+      const x=X(idxOf[m.dt]), y=Y(m.px);
+      if(m.t==='B') return `<path d="M${(x-5).toFixed(1)},${(y+11).toFixed(1)} L${(x+5).toFixed(1)},${(y+11).toFixed(1)} L${x.toFixed(1)},${(y+2).toFixed(1)} Z" fill="var(--green)"/>`;
+      if(m.t==='S') return `<path d="M${(x-5).toFixed(1)},${(y-11).toFixed(1)} L${(x+5).toFixed(1)},${(y-11).toFixed(1)} L${x.toFixed(1)},${(y-2).toFixed(1)} Z" fill="var(--red)"/>`;
+      return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2" fill="var(--gold)"/>`;
+    }).join('');
+    const nB=ch.marks.filter(m=>m.t==='B').length, nS=ch.marks.filter(m=>m.t==='S').length, nN=ch.marks.filter(m=>m.t==='N').length;
+    priceChart = `<div style="background:#0a1420;border:1px solid var(--border);border-radius:6px;padding:10px;margin-top:10px">
+      <div style="font-size:9px;color:var(--dim);letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px;display:flex;justify-content:space-between;flex-wrap:wrap">
+        <span>Price &amp; 200 EMA · 5 years · per your 200 EMA Scanner</span>
+        <span style="text-transform:none"><span style="color:#c9d1d9">━ price</span> &nbsp; <span style="color:var(--amber)">━ 200 EMA</span> &nbsp; <span style="color:var(--green)">▲ bull ${nB}</span> &nbsp; <span style="color:var(--red)">▼ bear ${nS}</span> &nbsp; <span style="color:var(--gold)">● near ${nN}</span></span></div>
+      <svg viewBox="0 0 ${CW} ${CH}" style="width:100%;height:auto;display:block">
+        <polyline points="${line(ch.close)}" fill="none" stroke="#c9d1d9" stroke-width="1"/>
+        <polyline points="${line(ch.ema200)}" fill="none" stroke="var(--amber)" stroke-width="1.6"/>
+        ${marks}
+      </svg></div>`;
+  }
+
   const cf = d.config || {};
   const cfgLine = cf.strategy ? `<div style="font-size:10px;color:var(--dim);margin-bottom:10px">
       ${cf.strategy} · exit: ${cf.exit} · ${cf.direction} · ₹${Number(cf.capital).toLocaleString('en-IN')} start · ${cf.risk_pct}% risk/trade · SL ${cf.sl_atr}×ATR · ${cf.rr}R target</div>` : '';
@@ -1156,7 +1185,8 @@ function renderBacktest(d){
     `<div style="font-size:13px;font-weight:700;color:#e2e8f0;margin-bottom:4px">${d.symbol}
        <span style="font-size:10px;color:var(--dim);font-weight:400">· ${d.period.from} → ${d.period.to} · ${d.period.bars} daily bars</span></div>
      ${cfgLine}
-     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px">${cards}</div>
+     ${priceChart}
+     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:10px">${cards}</div>
      ${curve}${table}`;
 }
 
