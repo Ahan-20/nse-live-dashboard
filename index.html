@@ -532,6 +532,7 @@
         onkeydown="if(event.key==='Enter')runBacktest()">
       <button onclick="runBacktest()" style="background:var(--gold);color:#050a10;border:none;padding:8px 18px;border-radius:5px;font-weight:700;cursor:pointer;font-family:inherit;font-size:12px;letter-spacing:.5px">RUN ▶</button>
       <button onclick="runLeaderboard()" style="background:#1a2744;color:var(--cyan);border:1px solid var(--cyan);padding:8px 14px;border-radius:5px;font-weight:700;cursor:pointer;font-family:inherit;font-size:12px;letter-spacing:.5px">📊 ALL NIFTY 50</button>
+      <button onclick="runExitCompare()" style="background:#1a2744;color:var(--purple);border:1px solid var(--purple);padding:8px 14px;border-radius:5px;font-weight:700;cursor:pointer;font-family:inherit;font-size:12px;letter-spacing:.5px">⚖️ BEST EXIT</button>
       <span id="bt-status" style="font-size:11px;color:var(--dim)"></span>
     </div>
     <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px;padding:10px 12px;background:#0a1420;border:1px solid var(--border);border-radius:6px">
@@ -998,17 +999,25 @@ async function runLeaderboard(){
   }catch(e){ status.textContent='Error: '+e.message; status.style.color='var(--red)'; }
 }
 
+let _lbData = null, _lbBeatOnly = false;
+function lbToggleBeat(cb){ _lbBeatOnly = cb.checked; renderLeaderboard(_lbData); }
+
 function renderLeaderboard(d){
+  _lbData = d;
   const pos = v => (v==null)?'var(--dim)':(v>=0?'var(--green)':'var(--red)');
   const cf = d.config||{};
   const beat = d.rows.filter(r=>r.vs_buyhold!=null && r.vs_buyhold>0).length;
   const profit = d.rows.filter(r=>r.return_pct!=null && r.return_pct>0).length;
   const cfgLine = cf.strategy ? `${cf.strategy} · exit: ${cf.exit} · ${cf.direction} · ${cf.risk_pct}% risk · SL ${cf.sl_atr}×ATR · ${cf.rr}R` : '';
-  const rows = d.rows.map((r,i)=>{
+  let shown = d.rows;
+  if(_lbBeatOnly) shown = d.rows.filter(r=>!r.skip && r.vs_buyhold!=null && r.vs_buyhold>0);
+  const rows = shown.map((r,i)=>{
     if(r.skip) return `<tr><td style="color:var(--dim)">${i+1}</td><td>${r.symbol}</td><td colspan="7" style="color:var(--dim)">— too new / no data —</td></tr>`;
-    return `<tr style="cursor:pointer" onclick="btChip('${r.symbol}')">
+    const wins = r.vs_buyhold!=null && r.vs_buyhold>0;
+    const tint = wins ? 'background:rgba(0,255,157,.07)' : '';
+    return `<tr style="cursor:pointer;${tint}" onclick="btChip('${r.symbol}')">
       <td style="color:var(--dim)">${i+1}</td>
-      <td style="font-weight:700;color:#e2e8f0">${r.symbol}</td>
+      <td style="font-weight:700;color:#e2e8f0">${wins?'★ ':''}${r.symbol}</td>
       <td style="text-align:right;color:${pos(r.return_pct)};font-weight:700">${r.return_pct}%</td>
       <td style="text-align:right;color:${pos(r.buyhold_return_pct)}">${r.buyhold_return_pct}%</td>
       <td style="text-align:right;color:${pos(r.vs_buyhold)};font-weight:700">${r.vs_buyhold>=0?'+':''}${r.vs_buyhold}%</td>
@@ -1018,12 +1027,45 @@ function renderLeaderboard(d){
       <td style="text-align:right;color:var(--red)">${r.max_drawdown_pct}%</td></tr>`;
   }).join('');
   document.getElementById('bt-results').innerHTML =
-    `<div style="font-size:13px;font-weight:700;color:var(--cyan);margin-bottom:4px">NIFTY 50 Leaderboard <span style="font-size:10px;color:var(--dim);font-weight:400">· ranked by return · click a row to drill in</span></div>
-     <div style="font-size:10px;color:var(--dim);margin-bottom:8px">${cfgLine}<br>${profit}/50 profitable · ${beat}/50 beat buy-&-hold</div>
+    `<div style="font-size:13px;font-weight:700;color:var(--cyan);margin-bottom:4px">NIFTY 50 Leaderboard <span style="font-size:10px;color:var(--dim);font-weight:400">· ranked by return · ★ = beats buy-&-hold · click a row to drill in</span></div>
+     <div style="font-size:10px;color:var(--dim);margin-bottom:8px">${cfgLine}<br>${profit}/50 profitable · <b style="color:var(--green)">${beat}/50 beat buy-&-hold</b>
+       <label style="margin-left:14px;color:#a0aec0;cursor:pointer"><input type="checkbox" ${_lbBeatOnly?'checked':''} onchange="lbToggleBeat(this)" style="vertical-align:middle"> show only B&H-beaters</label></div>
      <div style="max-height:520px;overflow:auto;border:1px solid var(--border);border-radius:6px">
        <table class="matrix" style="width:100%">
          <thead><tr><th>#</th><th>Stock</th><th style="text-align:right">Return</th><th style="text-align:right">Buy&Hold</th><th style="text-align:right">vs B&H</th><th style="text-align:right">Win%</th><th style="text-align:right">Trades</th><th style="text-align:right">PF</th><th style="text-align:right">MaxDD</th></tr></thead>
          <tbody>${rows}</tbody></table></div>`;
+}
+
+async function runExitCompare(){
+  const status = document.getElementById('bt-status');
+  const out = document.getElementById('bt-results');
+  status.textContent='Comparing exit methods across all 50 (150 backtests)…'; status.style.color='var(--amber)';
+  out.innerHTML='';
+  try{
+    const p = btParams(); p.delete('exit');
+    const r = await fetch('/api/exitcompare?'+p.toString(), {cache:'no-store'});
+    const d = await r.json();
+    status.textContent=''; renderExitCompare(d);
+  }catch(e){ status.textContent='Error: '+e.message; status.style.color='var(--red)'; }
+}
+
+function renderExitCompare(d){
+  const pos = v => v>=0?'var(--green)':'var(--red)';
+  const best = d.results[0];
+  const rows = d.results.map((r,i)=>`<tr style="${i===0?'background:rgba(179,136,255,.10)':''}">
+      <td style="font-weight:700;color:#e2e8f0">${i===0?'🏆 ':''}${r.label}</td>
+      <td style="text-align:right;font-weight:700;color:var(--green)">${r.beat_bh}/${r.n}</td>
+      <td style="text-align:right">${r.profitable}/${r.n}</td>
+      <td style="text-align:right;color:${pos(r.avg_return)}">${r.avg_return}%</td>
+      <td style="text-align:right;color:${pos(r.median_return)}">${r.median_return}%</td></tr>`).join('');
+  document.getElementById('bt-results').innerHTML =
+    `<div style="font-size:13px;font-weight:700;color:var(--purple);margin-bottom:4px">Which exit beats buy-&-hold most? <span style="font-size:10px;color:var(--dim);font-weight:400">· NIFTY 50 · ranked by # beating B&H</span></div>
+     <div style="font-size:11px;color:#a0aec0;margin-bottom:10px">Best for these stocks: <b style="color:var(--purple)">${best.label}</b> — beats buy-&-hold on ${best.beat_bh}/${best.n} stocks.</div>
+     <div style="border:1px solid var(--border);border-radius:6px;overflow:hidden">
+       <table class="matrix" style="width:100%">
+         <thead><tr><th>Exit method</th><th style="text-align:right">Beats B&H</th><th style="text-align:right">Profitable</th><th style="text-align:right">Avg return</th><th style="text-align:right">Median return</th></tr></thead>
+         <tbody>${rows}</tbody></table></div>
+     <div style="font-size:10px;color:var(--dim);margin-top:8px">Tip: even the best exit rarely beats simply holding most NIFTY 50 stocks over a 5-year bull run — that's the honest verdict on the 200 EMA cross.</div>`;
 }
 
 async function runBacktest(){

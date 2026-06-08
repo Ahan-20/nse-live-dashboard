@@ -329,6 +329,33 @@ class Handler(BaseHTTPRequestHandler):
                                      is not None else -1e9), reverse=True)
             body = json.dumps({"ok": True, "rows": rows, "config": config})
             return self._send(200, body.encode("utf-8"), "application/json")
+        if self.path.startswith("/api/exitcompare"):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            labels = {"cross": "Opposite 200 EMA cross", "sltp": "ATR stop + R:R target",
+                      "either": "Stop/target or cross"}
+            results = []
+            for ex in ("cross", "sltp", "either"):
+                qq = dict(q); qq["exit"] = [ex]
+                rets, prof, beat, cnt = [], 0, 0, 0
+                for sym in NIFTY50:
+                    try:
+                        r = cached_backtest(sym, qq)
+                    except Exception:
+                        r = {"ok": False}
+                    if r.get("ok"):
+                        cnt += 1
+                        rets.append(r["return_pct"])
+                        if r["return_pct"] > 0: prof += 1
+                        if (r.get("vs_buyhold") or 0) > 0: beat += 1
+                rets.sort()
+                results.append({
+                    "exit": ex, "label": labels[ex], "n": cnt,
+                    "profitable": prof, "beat_bh": beat,
+                    "avg_return": round(sum(rets) / len(rets), 1) if rets else 0,
+                    "median_return": rets[len(rets) // 2] if rets else 0})
+            results.sort(key=lambda x: x["beat_bh"], reverse=True)
+            body = json.dumps({"ok": True, "results": results})
+            return self._send(200, body.encode("utf-8"), "application/json")
         if self.path in ("/", "/index.html"):
             try:
                 body = (HERE / "index.html").read_bytes()
