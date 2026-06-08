@@ -999,8 +999,16 @@ async function runLeaderboard(){
   }catch(e){ status.textContent='Error: '+e.message; status.style.color='var(--red)'; }
 }
 
-let _lbData = null, _lbBeatOnly = false;
+let _lbData = null, _lbBeatOnly = false, _lbMinWin = 0, _lbMinTrades = 0;
+let _lbSortKey = 'return_pct', _lbSortDir = -1;
 function lbToggleBeat(cb){ _lbBeatOnly = cb.checked; renderLeaderboard(_lbData); }
+function lbSetMinWin(v){ _lbMinWin = parseFloat(v)||0; renderLeaderboard(_lbData); }
+function lbSetMinTrades(v){ _lbMinTrades = parseInt(v)||0; renderLeaderboard(_lbData); }
+function lbSort(key){
+  if(_lbSortKey===key) _lbSortDir = -_lbSortDir;
+  else { _lbSortKey = key; _lbSortDir = (key==='max_drawdown_pct')?1:-1; }
+  renderLeaderboard(_lbData);
+}
 
 function renderLeaderboard(d){
   _lbData = d;
@@ -1009,11 +1017,24 @@ function renderLeaderboard(d){
   const beat = d.rows.filter(r=>r.vs_buyhold!=null && r.vs_buyhold>0).length;
   const profit = d.rows.filter(r=>r.return_pct!=null && r.return_pct>0).length;
   const cfgLine = cf.strategy ? `${cf.strategy} · exit: ${cf.exit} · ${cf.direction} · ${cf.risk_pct}% risk · SL ${cf.sl_atr}×ATR · ${cf.rr}R` : '';
-  let shown = d.rows;
-  if(_lbBeatOnly) shown = d.rows.filter(r=>!r.skip && r.vs_buyhold!=null && r.vs_buyhold>0);
+
+  // filter
+  let shown = d.rows.filter(r=>!r.skip);
+  if(_lbBeatOnly) shown = shown.filter(r=>r.vs_buyhold!=null && r.vs_buyhold>0);
+  if(_lbMinWin>0) shown = shown.filter(r=>r.win_rate!=null && r.win_rate>=_lbMinWin);
+  if(_lbMinTrades>0) shown = shown.filter(r=>r.trades!=null && r.trades>=_lbMinTrades);
+  // sort
+  shown.sort((a,b)=>{
+    const av=a[_lbSortKey], bv=b[_lbSortKey];
+    if(av==null) return 1; if(bv==null) return -1;
+    return (av<bv?-1:av>bv?1:0)*_lbSortDir;
+  });
+
+  const arrow = k => _lbSortKey===k ? (_lbSortDir<0?' ▼':' ▲') : '';
+  const th = (k,label) => `<th style="text-align:right;cursor:pointer" onclick="lbSort('${k}')">${label}${arrow(k)}</th>`;
   const rows = shown.map((r,i)=>{
-    if(r.skip) return `<tr><td style="color:var(--dim)">${i+1}</td><td>${r.symbol}</td><td colspan="7" style="color:var(--dim)">— too new / no data —</td></tr>`;
     const wins = r.vs_buyhold!=null && r.vs_buyhold>0;
+    const hiWin = r.win_rate>=50;
     const tint = wins ? 'background:rgba(0,255,157,.07)' : '';
     return `<tr style="cursor:pointer;${tint}" onclick="btChip('${r.symbol}')">
       <td style="color:var(--dim)">${i+1}</td>
@@ -1021,18 +1042,23 @@ function renderLeaderboard(d){
       <td style="text-align:right;color:${pos(r.return_pct)};font-weight:700">${r.return_pct}%</td>
       <td style="text-align:right;color:${pos(r.buyhold_return_pct)}">${r.buyhold_return_pct}%</td>
       <td style="text-align:right;color:${pos(r.vs_buyhold)};font-weight:700">${r.vs_buyhold>=0?'+':''}${r.vs_buyhold}%</td>
-      <td style="text-align:right">${r.win_rate}%</td>
+      <td style="text-align:right;font-weight:700;color:${hiWin?'var(--green)':'#a0aec0'}">${r.win_rate}%</td>
       <td style="text-align:right">${r.trades}</td>
       <td style="text-align:right;color:${r.profit_factor>=1?'var(--green)':'var(--red)'}">${r.profit_factor}</td>
       <td style="text-align:right;color:var(--red)">${r.max_drawdown_pct}%</td></tr>`;
-  }).join('');
+  }).join('') || `<tr><td colspan="9" style="color:var(--dim);text-align:center;padding:14px">No stocks match the filter.</td></tr>`;
   document.getElementById('bt-results').innerHTML =
-    `<div style="font-size:13px;font-weight:700;color:var(--cyan);margin-bottom:4px">NIFTY 50 Leaderboard <span style="font-size:10px;color:var(--dim);font-weight:400">· ranked by return · ★ = beats buy-&-hold · click a row to drill in</span></div>
-     <div style="font-size:10px;color:var(--dim);margin-bottom:8px">${cfgLine}<br>${profit}/50 profitable · <b style="color:var(--green)">${beat}/50 beat buy-&-hold</b>
-       <label style="margin-left:14px;color:#a0aec0;cursor:pointer"><input type="checkbox" ${_lbBeatOnly?'checked':''} onchange="lbToggleBeat(this)" style="vertical-align:middle"> show only B&H-beaters</label></div>
+    `<div style="font-size:13px;font-weight:700;color:var(--cyan);margin-bottom:4px">NIFTY 50 Leaderboard <span style="font-size:10px;color:var(--dim);font-weight:400">· click any column to sort · click a row to drill in · ★ = beats buy-&-hold</span></div>
+     <div style="font-size:10px;color:var(--dim);margin-bottom:8px">${cfgLine}<br>${profit}/50 profitable · <b style="color:var(--green)">${beat}/50 beat buy-&-hold</b> · showing <b>${shown.length}</b></div>
+     <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin-bottom:8px;font-size:11px;color:#a0aec0">
+       <label>Min win % <input type="number" value="${_lbMinWin}" min="0" max="100" step="5" onchange="lbSetMinWin(this.value)" style="width:64px;background:#050a10;border:1px solid var(--border);color:#e2e8f0;padding:4px 6px;border-radius:4px;font-family:inherit"></label>
+       <label>Min trades <input type="number" value="${_lbMinTrades}" min="0" step="1" onchange="lbSetMinTrades(this.value)" style="width:64px;background:#050a10;border:1px solid var(--border);color:#e2e8f0;padding:4px 6px;border-radius:4px;font-family:inherit"></label>
+       <label style="cursor:pointer"><input type="checkbox" ${_lbBeatOnly?'checked':''} onchange="lbToggleBeat(this)" style="vertical-align:middle"> beats buy-&-hold only</label>
+       <span style="color:var(--dim)">tip: set Min win % = 50, click <b>Win%</b> to rank by probability</span>
+     </div>
      <div style="max-height:520px;overflow:auto;border:1px solid var(--border);border-radius:6px">
        <table class="matrix" style="width:100%">
-         <thead><tr><th>#</th><th>Stock</th><th style="text-align:right">Return</th><th style="text-align:right">Buy&Hold</th><th style="text-align:right">vs B&H</th><th style="text-align:right">Win%</th><th style="text-align:right">Trades</th><th style="text-align:right">PF</th><th style="text-align:right">MaxDD</th></tr></thead>
+         <thead><tr><th>#</th><th>Stock</th>${th('return_pct','Return')}${th('buyhold_return_pct','Buy&Hold')}${th('vs_buyhold','vs B&H')}${th('win_rate','Win%')}${th('trades','Trades')}${th('profit_factor','PF')}${th('max_drawdown_pct','MaxDD')}</tr></thead>
          <tbody>${rows}</tbody></table></div>`;
 }
 
