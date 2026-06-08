@@ -90,14 +90,26 @@ def atr(h, l, c, n=14):
 
 
 # ── data ─────────────────────────────────────────────────────────────
+# Clean ticker renames: current symbol -> predecessor ticker(s) whose pre-rename
+# history we stitch on. Only pure renames (no price adjustment) — NOT demergers.
+ALIASES = {"ETERNAL": ["ZOMATO"]}
+
+
 def load(symbol):
+    symbol = symbol.upper()
+    syms = [symbol] + ALIASES.get(symbol, [])
     con = sqlite3.connect(DB_PATH)
+    ph = ",".join("?" * len(syms))
     rows = con.execute(
-        "SELECT dt,o,h,l,c,v FROM prices WHERE symbol=? ORDER BY dt", (symbol.upper(),)
+        f"SELECT dt,o,h,l,c,v,symbol FROM prices WHERE symbol IN ({ph})", syms
     ).fetchall()
     con.close()
-    bars = [{"dt": r[0], "o": r[1], "h": r[2], "l": r[3], "c": r[4], "v": r[5]} for r in rows]
-    return bars
+    best = {}                       # one row per date; prefer the current symbol
+    for dt, o, h, l, c, v, sym in rows:
+        if dt not in best or sym == symbol:
+            best[dt] = (o, h, l, c, v)
+    return [{"dt": dt, "o": r[0], "h": r[1], "l": r[2], "c": r[3], "v": r[4]}
+            for dt, r in sorted(best.items())]
 
 
 def weekly_htf_bull_bear(bars):

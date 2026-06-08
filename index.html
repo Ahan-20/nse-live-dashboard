@@ -519,8 +519,13 @@
       </div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
-      <input id="bt-symbol" placeholder="Stock symbol — e.g. RELIANCE"
-        style="background:#050a10;border:1px solid var(--border);color:#e2e8f0;padding:8px 12px;border-radius:5px;font-family:inherit;font-size:13px;width:240px;text-transform:uppercase"
+      <select id="bt-nifty" onchange="if(this.value){document.getElementById('bt-symbol').value=this.value;runBacktest();}"
+        style="background:#050a10;border:1px solid var(--gold);color:var(--gold);padding:8px 12px;border-radius:5px;font-family:inherit;font-size:13px;cursor:pointer">
+        <option value="">▼ Pick a NIFTY 50 stock</option>
+      </select>
+      <span style="color:var(--dim);font-size:11px">or</span>
+      <input id="bt-symbol" placeholder="any NSE symbol — e.g. DLF"
+        style="background:#050a10;border:1px solid var(--border);color:#e2e8f0;padding:8px 12px;border-radius:5px;font-family:inherit;font-size:13px;width:200px;text-transform:uppercase"
         onkeydown="if(event.key==='Enter')runBacktest()">
       <button onclick="runBacktest()" style="background:var(--gold);color:#050a10;border:none;padding:8px 18px;border-radius:5px;font-weight:700;cursor:pointer;font-family:inherit;font-size:12px;letter-spacing:.5px">RUN ▶</button>
       <span id="bt-status" style="font-size:11px;color:var(--dim)"></span>
@@ -940,11 +945,15 @@ function showTab(name, el){
 }
 
 // ─── BACKTEST ────────────────────────────────────────────────────
-const BT_EXAMPLES = ['RELIANCE','HDFCBANK','INFY','TATAMOTORS','SBIN','TATASTEEL','ITC','SUNPHARMA'];
+const NIFTY50=['ADANIENT','ADANIPORTS','APOLLOHOSP','ASIANPAINT','AXISBANK','BAJAJ-AUTO','BAJFINANCE','BAJAJFINSV','BEL','BHARTIARTL','CIPLA','COALINDIA','DRREDDY','EICHERMOT','ETERNAL','GRASIM','HCLTECH','HDFCBANK','HDFCLIFE','HINDALCO','HINDUNILVR','ICICIBANK','ITC','INFY','INDIGO','JSWSTEEL','JIOFIN','KOTAKBANK','LT','M&M','MARUTI','MAXHEALTH','NTPC','NESTLEIND','ONGC','POWERGRID','RELIANCE','SBILIFE','SHRIRAMFIN','SBIN','SUNPHARMA','TCS','TATACONSUM','TMPV','TATASTEEL','TECHM','TITAN','TRENT','ULTRACEMCO','WIPRO'];
+const BT_EXAMPLES = ['RELIANCE','HDFCBANK','INFY','TCS','SBIN','TATASTEEL'];
 function initBtChips(){
+  const sel = document.getElementById('bt-nifty');
+  if(sel) sel.innerHTML = '<option value="">▼ Pick a NIFTY 50 stock</option>' +
+    NIFTY50.slice().sort().map(s=>`<option value="${s}">${s}</option>`).join('');
   const box = document.getElementById('bt-chips');
-  if(!box) return;
-  box.innerHTML = BT_EXAMPLES.map(s=>`<span onclick="btChip('${s}')" style="cursor:pointer;font-size:10px;padding:3px 9px;border-radius:3px;background:#1a2744;color:#a0aec0;border:1px solid #1e3050">${s}</span>`).join('');
+  if(box) box.innerHTML = '<span style="font-size:10px;color:var(--dim)">Quick:</span>' +
+    BT_EXAMPLES.map(s=>`<span onclick="btChip('${s}')" style="cursor:pointer;font-size:10px;padding:3px 9px;border-radius:3px;background:#1a2744;color:#a0aec0;border:1px solid #1e3050">${s}</span>`).join('');
 }
 function btChip(s){ document.getElementById('bt-symbol').value = s; runBacktest(); }
 
