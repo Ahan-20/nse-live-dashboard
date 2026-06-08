@@ -108,8 +108,37 @@ def load(symbol):
     for dt, o, h, l, c, v, sym in rows:
         if dt not in best or sym == symbol:
             best[dt] = (o, h, l, c, v)
-    return [{"dt": dt, "o": r[0], "h": r[1], "l": r[2], "c": r[3], "v": r[4]}
+    bars = [{"dt": dt, "o": r[0], "h": r[1], "l": r[2], "c": r[3], "v": r[4]}
             for dt, r in sorted(best.items())]
+    return _adjust_corporate_actions(bars)
+
+
+def _adjust_corporate_actions(bars):
+    """Back-adjust for splits/bonuses. NSE bhavcopy is UNADJUSTED, so a 1:1
+    bonus shows as a fake ~50% overnight crash. We detect large clean gaps
+    (open vs previous close) and scale all earlier bars to the new price
+    basis, producing a continuous series like TradingView's adjusted data."""
+    n = len(bars)
+    if n < 2:
+        return bars
+    mult = [1.0] * n
+    running = 1.0
+    events = 0
+    for i in range(n - 1, 0, -1):
+        pc = bars[i - 1]["c"]
+        op = bars[i]["o"]
+        g = op / pc if pc > 0 else 1.0
+        if g < 0.70 or g > 1.43:        # >~30% clean gap = split/bonus, not a real move
+            running *= g
+            events += 1
+        mult[i - 1] = running
+    if events:
+        for i in range(n):
+            m = mult[i]
+            if m != 1.0:
+                b = bars[i]
+                b["o"] *= m; b["h"] *= m; b["l"] *= m; b["c"] *= m
+    return bars
 
 
 def weekly_htf_bull_bear(bars):
