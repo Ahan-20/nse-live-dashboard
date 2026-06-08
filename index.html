@@ -1,0 +1,992 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Courier New',monospace;background:#080c14;color:#c9d1d9;font-size:13px;overflow-x:hidden}
+  :root{
+    --green:#00ff9d;--red:#ff4466;--amber:#ffb347;--cyan:#00e5ff;--purple:#b388ff;
+    --blue:#4fc3f7;--dim:#4a5568;--card:#0d1b2a;--border:#1a2744;--gold:#ffd700
+  }
+  .root{display:grid;grid-template-columns:1fr 1fr 1fr;grid-template-rows:auto auto auto auto;gap:10px;padding:10px;min-height:100vh}
+  
+  /* TOP HEADER */
+  .header{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;
+    background:linear-gradient(135deg,#0d1b2a 0%,#0a1628 100%);
+    border:1px solid var(--border);border-radius:8px;padding:12px 18px}
+  .logo{display:flex;align-items:center;gap:10px}
+  .logo-dot{width:10px;height:10px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:pulse 2s infinite}
+  .logo-txt{font-size:16px;font-weight:700;color:var(--cyan);letter-spacing:2px}
+  .logo-sub{font-size:10px;color:var(--dim);letter-spacing:1px;margin-top:2px}
+  .header-meta{display:flex;gap:20px;align-items:center}
+  .meta-chip{background:#111d30;border:1px solid var(--border);border-radius:4px;padding:4px 10px;font-size:11px;color:var(--dim)}
+  .meta-chip span{color:var(--amber);font-weight:700}
+  .live-badge{background:#1a0a0a;border:1px solid var(--red);border-radius:4px;padding:3px 8px;font-size:10px;color:var(--red);animation:blink 1.5s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+  @keyframes slideIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes flash{0%,100%{background:transparent}50%{background:rgba(0,255,157,.08)}}
+
+  /* CARD BASE */
+  .card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px;animation:slideIn .4s ease}
+  .card-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+  .card-title{font-size:11px;color:var(--dim);letter-spacing:1.5px;text-transform:uppercase;font-weight:700}
+  .badge{font-size:9px;padding:2px 7px;border-radius:3px;font-weight:700;letter-spacing:.5px}
+  .badge-green{background:rgba(0,255,157,.12);color:var(--green);border:1px solid rgba(0,255,157,.25)}
+  .badge-red{background:rgba(255,68,102,.12);color:var(--red);border:1px solid rgba(255,68,102,.25)}
+  .badge-amber{background:rgba(255,179,71,.12);color:var(--amber);border:1px solid rgba(255,179,71,.25)}
+  .badge-cyan{background:rgba(0,229,255,.1);color:var(--cyan);border:1px solid rgba(0,229,255,.2)}
+  .badge-purple{background:rgba(179,136,255,.1);color:var(--purple);border:1px solid rgba(179,136,255,.2)}
+
+  /* SECTOR TABLE */
+  .sector-grid{display:grid;gap:5px}
+  .sector-row{display:grid;grid-template-columns:1fr 60px 55px 70px;align-items:center;gap:6px;
+    padding:6px 8px;border-radius:5px;border:1px solid transparent;cursor:pointer;transition:all .2s}
+  .sector-row:hover{border-color:var(--border);background:#111d30}
+  .sector-row.active{border-color:rgba(0,255,157,.3);background:rgba(0,255,157,.04);animation:flash 2s infinite}
+  .sector-row.danger{border-color:rgba(255,68,102,.2);background:rgba(255,68,102,.04)}
+  .sector-name{font-size:11px;color:#a0aec0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sector-val{font-size:12px;font-weight:700;text-align:right}
+  .sector-bar-wrap{height:4px;background:#1a2744;border-radius:2px;overflow:hidden}
+  .sector-bar{height:100%;border-radius:2px;transition:width .5s}
+  .bar-green{background:var(--green)}
+  .bar-red{background:var(--red)}
+  .signal-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+
+  /* GAINERS LOSERS */
+  .gl-col{grid-column:span 1}
+  .stock-list{display:grid;gap:4px}
+  .stock-row{display:grid;grid-template-columns:1fr 55px 50px 22px;align-items:center;gap:6px;
+    padding:5px 8px;border-radius:4px;border-left:3px solid transparent;background:#0a1420;cursor:pointer;transition:all .2s}
+  .stock-row:hover{background:#111d30}
+  .stock-row.gainer{border-left-color:var(--green)}
+  .stock-row.loser{border-left-color:var(--red)}
+  .sname{font-size:11px;color:#e2e8f0;font-weight:700}
+  .sprice{font-size:11px;color:var(--dim)}
+  .spct{font-size:11px;font-weight:700;text-align:right}
+  .sicon{font-size:13px;text-align:center}
+
+  /* SIGNAL PANEL */
+  .signal-panel{grid-column:span 2}
+  .signal-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+  .signal-card{border-radius:6px;padding:10px;border:1px solid;position:relative;overflow:hidden}
+  .signal-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px}
+  .sig-long{border-color:rgba(0,255,157,.3);background:rgba(0,255,157,.04)}
+  .sig-long::before{background:linear-gradient(90deg,var(--green),transparent)}
+  .sig-short{border-color:rgba(255,68,102,.3);background:rgba(255,68,102,.04)}
+  .sig-short::before{background:linear-gradient(90deg,var(--red),transparent)}
+  .sig-early{border-color:rgba(255,179,71,.3);background:rgba(255,179,71,.04)}
+  .sig-early::before{background:linear-gradient(90deg,var(--amber),transparent)}
+  .sig-squeeze{border-color:rgba(0,229,255,.3);background:rgba(0,229,255,.04)}
+  .sig-squeeze::before{background:linear-gradient(90deg,var(--cyan),transparent)}
+  .sig-name{font-size:10px;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;font-weight:700}
+  .sig-desc{font-size:10px;color:var(--dim);line-height:1.5}
+  .sig-conditions{margin-top:6px;display:flex;flex-wrap:wrap;gap:3px}
+  .cond-tag{font-size:9px;padding:1px 5px;border-radius:2px;background:#1a2744;color:#718096;border:1px solid #1e3050;letter-spacing:.3px}
+  .cond-tag.met{background:rgba(0,255,157,.1);color:var(--green);border-color:rgba(0,255,157,.25)}
+
+  /* FILTER ENGINE */
+  .filter-engine{grid-column:span 1}
+  .filter-list{display:grid;gap:6px}
+  .filter-item{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:5px;background:#0a1420;border:1px solid var(--border)}
+  .filter-icon{width:24px;height:24px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
+  .filter-text{flex:1}
+  .filter-name{font-size:11px;color:#a0aec0;font-weight:600}
+  .filter-desc{font-size:9px;color:var(--dim);margin-top:1px}
+  .filter-status{font-size:10px;font-weight:700}
+
+  /* PINE SCRIPT CODE */
+  .code-panel{grid-column:1/-1}
+  .code-tabs{display:flex;gap:1px;margin-bottom:0;border-bottom:1px solid var(--border)}
+  .tab{padding:7px 16px;font-size:11px;cursor:pointer;color:var(--dim);letter-spacing:.5px;border-bottom:2px solid transparent;transition:all .2s}
+  .tab.active{color:var(--cyan);border-bottom-color:var(--cyan)}
+  .tab:hover{color:#a0aec0}
+  .code-block{background:#050a10;border:1px solid var(--border);border-top:none;border-radius:0 0 8px 8px;padding:14px;overflow-x:auto;position:relative}
+  .code-inner{font-size:11px;line-height:1.7;white-space:pre;font-family:'Courier New',monospace}
+  .c-comment{color:#4a6080}
+  .c-kw{color:#c792ea}
+  .c-fn{color:#82aaff}
+  .c-str{color:#c3e88d}
+  .c-num{color:#f78c6c}
+  .c-var{color:#ffcb6b}
+  .c-op{color:#89ddff}
+  .c-bool{color:#00e5ff}
+  .copy-btn{position:absolute;top:10px;right:10px;background:#1a2744;border:1px solid var(--border);color:var(--dim);padding:4px 10px;border-radius:4px;font-size:10px;cursor:pointer;font-family:inherit;transition:all .2s;letter-spacing:.5px}
+  .copy-btn:hover{border-color:var(--cyan);color:var(--cyan)}
+  .copy-btn.copied{border-color:var(--green);color:var(--green)}
+
+  /* SETUP GUIDE */
+  .setup-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+  .step-card{border-radius:6px;padding:10px;background:#0a1420;border:1px solid var(--border);position:relative}
+  .step-num{position:absolute;top:-10px;left:10px;width:20px;height:20px;border-radius:50%;
+    background:var(--cyan);color:#050a10;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700}
+  .step-title{font-size:11px;color:#e2e8f0;font-weight:700;margin-bottom:5px;margin-top:4px}
+  .step-body{font-size:10px;color:var(--dim);line-height:1.6}
+  .step-tag{display:inline-block;background:#1a2744;color:var(--amber);padding:1px 5px;border-radius:2px;font-size:9px;margin-top:4px}
+
+  /* TIMEFRAME SWITCHER */
+  .tf-switch{display:flex;gap:0;background:#050a10;border-radius:5px;border:1px solid var(--border);overflow:hidden}
+  .tf-btn{padding:4px 12px;font-size:11px;cursor:pointer;color:var(--dim);border:none;background:transparent;font-family:inherit;transition:all .2s;border-right:1px solid var(--border)}
+  .tf-btn:last-child{border-right:none}
+  .tf-btn.active{background:#1a2744;color:var(--cyan)}
+  .tf-btn:hover:not(.active){color:#a0aec0}
+
+  /* NIFTY TICKER */
+  .ticker-bar{grid-column:1/-1;display:flex;gap:16px;overflow-x:auto;padding:0;scrollbar-width:none}
+  .ticker-bar::-webkit-scrollbar{display:none}
+  .tick-item{display:flex;align-items:center;gap:6px;background:#0d1b2a;border:1px solid var(--border);border-radius:5px;padding:5px 12px;flex-shrink:0}
+  .tick-name{font-size:10px;color:var(--dim);letter-spacing:.5px}
+  .tick-val{font-size:12px;font-weight:700}
+  .tick-chg{font-size:10px;font-weight:600}
+  .divider{width:1px;height:16px;background:var(--border)}
+
+  /* FILTER MATRIX */
+  .matrix{width:100%;border-collapse:collapse;font-size:10px}
+  .matrix th{color:var(--dim);padding:5px 8px;text-align:left;border-bottom:1px solid var(--border);letter-spacing:.5px;font-size:9px;text-transform:uppercase}
+  .matrix td{padding:5px 8px;border-bottom:1px solid rgba(26,39,68,.5);vertical-align:middle}
+  .matrix tr:last-child td{border-bottom:none}
+  .matrix tr:hover td{background:#0a1420}
+  .check{color:var(--green);font-weight:700}
+  .cross{color:var(--red);font-weight:700}
+  .wait{color:var(--amber);font-weight:700}
+</style>
+</head>
+<body>
+<div class="root">
+
+<!-- HEADER -->
+<div class="header">
+  <div class="logo">
+    <div class="logo-dot"></div>
+    <div>
+      <div class="logo-txt">NSE SCANNER PRO</div>
+      <div class="logo-sub">SECTOR · GAINER/LOSER · TREND CATCHER</div>
+    </div>
+  </div>
+  <div class="header-meta">
+    <div class="meta-chip">NIFTY 50 <span id="nifty-val">24,215</span> <span id="nifty-chg" style="color:var(--green)">+0.68%</span></div>
+    <div class="meta-chip">BANK NIFTY <span id="sensex-val">52,418</span> <span id="sensex-chg" style="color:var(--green)">+0.61%</span></div>
+    <div class="tf-switch">
+      <button class="tf-btn active" onclick="setTf('5m',this)">5m</button>
+      <button class="tf-btn" onclick="setTf('15m',this)">15m</button>
+    </div>
+    <div class="live-badge">● LIVE</div>
+  </div>
+</div>
+
+<!-- NIFTY INDEX TICKER -->
+<div class="ticker-bar" id="ticker-bar"></div>
+
+<!-- SECTOR INDICES -->
+<div class="card" style="grid-column:span 1">
+  <div class="card-hdr">
+    <div class="card-title">📡 Sectoral Indices</div>
+    <div class="badge badge-cyan" id="sector-signal-badge">SCANNING</div>
+  </div>
+  <div class="sector-grid" id="sector-grid"></div>
+</div>
+
+<!-- TOP GAINERS -->
+<div class="card gl-col">
+  <div class="card-hdr">
+    <div class="card-title">📈 NSE Top Gainers</div>
+    <div class="badge badge-green">LONG BIAS</div>
+  </div>
+  <div class="stock-list" id="gainers-list"></div>
+</div>
+
+<!-- TOP LOSERS -->
+<div class="card gl-col">
+  <div class="card-hdr">
+    <div class="card-title">📉 NSE Top Losers</div>
+    <div class="badge badge-red">SHORT BIAS</div>
+  </div>
+  <div class="stock-list" id="losers-list"></div>
+</div>
+
+<!-- SIGNAL TYPES -->
+<div class="card signal-panel">
+  <div class="card-hdr">
+    <div class="card-title">⚡ Signal Logic Engine</div>
+    <div class="badge badge-purple">4 SIGNAL TYPES</div>
+  </div>
+  <div class="signal-grid">
+    <div class="signal-card sig-long">
+      <div class="sig-name" style="color:var(--green)">▲ Confirmed Long</div>
+      <div class="sig-desc">Strictest entry. All filters pass. Enter immediately with full confidence.</div>
+      <div class="sig-conditions">
+        <span class="cond-tag met">HTF Bull</span><span class="cond-tag met">EMA Stack ▲</span>
+        <span class="cond-tag met">Vol &gt;2x</span><span class="cond-tag met">Breakout</span>
+        <span class="cond-tag met">Strong Candle</span><span class="cond-tag met">RSI 45-72</span>
+        <span class="cond-tag met">MACD Bull</span><span class="cond-tag met">Sector ↑</span>
+      </div>
+    </div>
+    <div class="signal-card sig-short">
+      <div class="sig-name" style="color:var(--red)">▼ Confirmed Short</div>
+      <div class="sig-desc">Mirror of long. All bearish filters aligned. Sell/short with confidence.</div>
+      <div class="sig-conditions">
+        <span class="cond-tag met" style="background:rgba(255,68,102,.1);color:var(--red);border-color:rgba(255,68,102,.3)">HTF Bear</span>
+        <span class="cond-tag met" style="background:rgba(255,68,102,.1);color:var(--red);border-color:rgba(255,68,102,.3)">EMA Stack ▼</span>
+        <span class="cond-tag met" style="background:rgba(255,68,102,.1);color:var(--red);border-color:rgba(255,68,102,.3)">Vol &gt;2x</span>
+        <span class="cond-tag met" style="background:rgba(255,68,102,.1);color:var(--red);border-color:rgba(255,68,102,.3)">Support Break</span>
+        <span class="cond-tag met" style="background:rgba(255,68,102,.1);color:var(--red);border-color:rgba(255,68,102,.3)">Sector ↓</span>
+      </div>
+    </div>
+    <div class="signal-card sig-early">
+      <div class="sig-name" style="color:var(--amber)">⚡ Early Entry</div>
+      <div class="sig-desc">EMA9 crosses EMA21 with HTF trend. Catch trend at inception, tighter SL.</div>
+      <div class="sig-conditions">
+        <span class="cond-tag">HTF Trend ✓</span><span class="cond-tag">EMA9 × EMA21</span>
+        <span class="cond-tag">Price &gt; EMA50</span><span class="cond-tag">Vol &gt;1.4x</span>
+        <span class="cond-tag">RSI &gt; 45</span><span class="cond-tag">No MACD conflict</span>
+      </div>
+    </div>
+    <div class="signal-card sig-squeeze">
+      <div class="sig-name" style="color:var(--cyan)">🔥 Squeeze Fire</div>
+      <div class="sig-desc">BB inside KC = energy coiling. When squeeze releases, explosive move follows.</div>
+      <div class="sig-conditions">
+        <span class="cond-tag">BB &lt; KC (squeeze)</span><span class="cond-tag">Squeeze fires</span>
+        <span class="cond-tag">Mom direction ✓</span><span class="cond-tag">HTF aligned</span>
+        <span class="cond-tag">Vol &gt;1.4x</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- LIVE TRADE ALERTS -->
+  <div class="card-hdr" style="margin-top:8px">
+    <div class="card-title">🎯 Live Scanner Alerts</div>
+    <div id="alert-count" class="badge badge-amber">0 SIGNALS</div>
+  </div>
+  <div id="alerts-feed" style="display:grid;gap:5px;max-height:160px;overflow-y:auto"></div>
+</div>
+
+<!-- ANTI-FAKEOUT FILTERS -->
+<div class="card filter-engine">
+  <div class="card-hdr">
+    <div class="card-title">🛡 Anti-Fakeout Engine</div>
+    <div class="badge badge-amber">7 FILTERS</div>
+  </div>
+  <div class="filter-list">
+    <div class="filter-item">
+      <div class="filter-icon" style="background:rgba(0,229,255,.1)">📊</div>
+      <div class="filter-text">
+        <div class="filter-name">HTF Confirmation</div>
+        <div class="filter-desc">15m trend must match 5m direction</div>
+      </div>
+      <div class="filter-status" style="color:var(--green)">ACTIVE</div>
+    </div>
+    <div class="filter-item">
+      <div class="filter-icon" style="background:rgba(0,255,157,.1)">🕯</div>
+      <div class="filter-text">
+        <div class="filter-name">Candle Body Ratio</div>
+        <div class="filter-desc">Body must be &gt;55% of full range. Rejects doji.</div>
+      </div>
+      <div class="filter-status" style="color:var(--green)">ACTIVE</div>
+    </div>
+    <div class="filter-item">
+      <div class="filter-icon" style="background:rgba(255,68,102,.1)">🪝</div>
+      <div class="filter-text">
+        <div class="filter-name">Wick Rejection Filter</div>
+        <div class="filter-desc">Opposing wick &lt;40% of body. No trap wicks.</div>
+      </div>
+      <div class="filter-status" style="color:var(--green)">ACTIVE</div>
+    </div>
+    <div class="filter-item">
+      <div class="filter-icon" style="background:rgba(255,179,71,.1)">📦</div>
+      <div class="filter-text">
+        <div class="filter-name">Volume Surge Gate</div>
+        <div class="filter-desc">Confirmed: &gt;2× avg. Early: &gt;1.4× avg.</div>
+      </div>
+      <div class="filter-status" style="color:var(--green)">ACTIVE</div>
+    </div>
+    <div class="filter-item">
+      <div class="filter-icon" style="background:rgba(179,136,255,.1)">↩</div>
+      <div class="filter-text">
+        <div class="filter-name">Breakout Retest</div>
+        <div class="filter-desc">Wait for price to return and confirm S/R flip.</div>
+      </div>
+      <div class="filter-status" style="color:var(--amber)">OPTIONAL</div>
+    </div>
+    <div class="filter-item">
+      <div class="filter-icon" style="background:rgba(0,229,255,.1)">⚡</div>
+      <div class="filter-text">
+        <div class="filter-name">Squeeze Gate</div>
+        <div class="filter-desc">Block signals during BB compression. Wait for fire.</div>
+      </div>
+      <div class="filter-status" style="color:var(--green)">ACTIVE</div>
+    </div>
+    <div class="filter-item">
+      <div class="filter-icon" style="background:rgba(0,255,157,.08)">🏭</div>
+      <div class="filter-text">
+        <div class="filter-name">Sector-Stock Alignment</div>
+        <div class="filter-desc">Stock must match sector directional bias.</div>
+      </div>
+      <div class="filter-status" style="color:var(--green)">ACTIVE</div>
+    </div>
+  </div>
+</div>
+
+<!-- PINE SCRIPT CODE PANEL -->
+<div class="card code-panel">
+  <div class="card-hdr">
+    <div class="card-title">📋 TradingView Pine Script v5</div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <div class="badge badge-green">READY TO PASTE</div>
+      <div class="badge badge-purple">NSE OPTIMIZED</div>
+    </div>
+  </div>
+  <div class="code-tabs">
+    <div class="tab active" onclick="showTab('main',this)">Main Scanner</div>
+    <div class="tab" onclick="showTab('setup',this)">Setup Guide</div>
+    <div class="tab" onclick="showTab('alerts',this)">Alert Conditions</div>
+    <div class="tab" onclick="showTab('workflow',this)">Daily Workflow</div>
+  </div>
+
+  <!-- TAB: MAIN CODE -->
+  <div id="tab-main" class="code-block">
+    <button class="copy-btn" onclick="copyCode('tab-main')">COPY</button>
+    <div class="code-inner" id="code-main"></div>
+  </div>
+
+  <!-- TAB: SETUP GUIDE -->
+  <div id="tab-setup" class="code-block" style="display:none;padding:16px">
+    <div class="setup-grid">
+      <div class="step-card">
+        <div class="step-num">1</div>
+        <div class="step-title">Add to TradingView</div>
+        <div class="step-body">Open TradingView → Pine Editor (bottom) → New → Paste entire script → Save → Add to Chart. Works on any NSE stock (NSE:RELIANCE, NSE:INFY etc.)</div>
+        <div class="step-tag">Pine Script v5</div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">2</div>
+        <div class="step-title">Set Timeframe</div>
+        <div class="step-body">Set chart to 5m for intraday scalping. Use 15m for swing intraday. The HTF input auto-uses 15m for 5m charts, 1H for 15m charts. Change in Settings.</div>
+        <div class="step-tag">5m chart → 15m HTF</div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">3</div>
+        <div class="step-title">Update Sector Daily</div>
+        <div class="step-body">Each morning, check NSE sector indices. In indicator Settings → "NSE Sector Inputs": toggle "Sector is UP/DOWN" and enter the % move. This aligns stock signals with sector bias.</div>
+        <div class="step-tag">Settings → Group 5</div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">4</div>
+        <div class="step-title">Tag Gainers/Losers</div>
+        <div class="step-body">Check NSE website for top gainers/losers. If the stock you're viewing is in that list, toggle "Stock in NSE Top Gainers/Losers" in Settings. This adds extra signal confidence.</div>
+        <div class="step-tag">Settings → Group 6</div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">5</div>
+        <div class="step-title">Set Alerts</div>
+        <div class="step-body">Right-click chart → Add Alert → Condition: "NSE PRO SCANNER" → pick signal type (Confirmed Long, Early Long, Squeeze Fire etc.) → set notification to phone/email.</div>
+        <div class="step-tag">8 alert conditions</div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">6</div>
+        <div class="step-title">Use Screener</div>
+        <div class="step-body">In TradingView Screener, add this indicator's outputs as columns. Filter for stocks where "SIGNAL = CONFIRMED LONG" to scan all NSE stocks at once automatically.</div>
+        <div class="step-tag">TV Stock Screener</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB: ALERTS -->
+  <div id="tab-alerts" class="code-block" style="display:none;padding:16px">
+    <table class="matrix" style="width:100%">
+      <thead>
+        <tr>
+          <th>Alert Name</th>
+          <th>Signal Type</th>
+          <th>Entry Urgency</th>
+          <th>Filters Required</th>
+          <th>Best For</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td style="color:var(--green);font-weight:700">✦ CONFIRMED LONG</td>
+          <td><span class="badge badge-green">BREAKOUT</span></td>
+          <td style="color:var(--green)">IMMEDIATE</td>
+          <td style="color:var(--dim)">All 8 filters</td>
+          <td style="color:#a0aec0">High conviction full position</td>
+        </tr>
+        <tr>
+          <td style="color:var(--red);font-weight:700">✦ CONFIRMED SHORT</td>
+          <td><span class="badge badge-red">BREAKDOWN</span></td>
+          <td style="color:var(--red)">IMMEDIATE</td>
+          <td style="color:var(--dim)">All 8 filters</td>
+          <td style="color:#a0aec0">Short selling / put options</td>
+        </tr>
+        <tr>
+          <td style="color:var(--amber);font-weight:700">⚡ EARLY LONG</td>
+          <td><span class="badge badge-amber">EMA CROSS</span></td>
+          <td style="color:var(--amber)">WATCH</td>
+          <td style="color:var(--dim)">6 filters (lighter)</td>
+          <td style="color:#a0aec0">Catch trend at start, tight SL</td>
+        </tr>
+        <tr>
+          <td style="color:var(--amber);font-weight:700">⚡ EARLY SHORT</td>
+          <td><span class="badge badge-amber">EMA CROSS</span></td>
+          <td style="color:var(--amber)">WATCH</td>
+          <td style="color:var(--dim)">6 filters (lighter)</td>
+          <td style="color:#a0aec0">Early short, pyramiding later</td>
+        </tr>
+        <tr>
+          <td style="color:var(--cyan);font-weight:700">🔥 SQUEEZE LONG</td>
+          <td><span class="badge badge-cyan">MOMENTUM</span></td>
+          <td style="color:var(--cyan)">FAST</td>
+          <td style="color:var(--dim)">4 filters + squeeze</td>
+          <td style="color:#a0aec0">Explosive momentum trades</td>
+        </tr>
+        <tr>
+          <td style="color:var(--cyan);font-weight:700">🔥 SQUEEZE SHORT</td>
+          <td><span class="badge badge-cyan">MOMENTUM</span></td>
+          <td style="color:var(--cyan)">FAST</td>
+          <td style="color:var(--dim)">4 filters + squeeze</td>
+          <td style="color:#a0aec0">Explosive crash trades</td>
+        </tr>
+        <tr>
+          <td style="color:#a0aec0;font-weight:700">↩ RETEST LONG</td>
+          <td><span class="badge badge-purple">RETEST</span></td>
+          <td style="color:var(--purple)">PATIENT</td>
+          <td style="color:var(--dim)">Breakout + retest</td>
+          <td style="color:#a0aec0">Safer entry after confirmation</td>
+        </tr>
+        <tr>
+          <td style="color:#a0aec0;font-weight:700">↩ RETEST SHORT</td>
+          <td><span class="badge badge-purple">RETEST</span></td>
+          <td style="color:var(--purple)">PATIENT</td>
+          <td style="color:var(--dim)">Breakdown + retest</td>
+          <td style="color:#a0aec0">Safer short after confirmation</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- TAB: DAILY WORKFLOW -->
+  <div id="tab-workflow" class="code-block" style="display:none;padding:16px">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div>
+        <div style="color:var(--cyan);font-size:11px;font-weight:700;letter-spacing:1px;margin-bottom:10px;border-bottom:1px solid var(--border);padding-bottom:6px">PRE-MARKET ROUTINE (8:45–9:15 AM)</div>
+        <div style="display:grid;gap:6px">
+          <div class="filter-item" style="padding:6px 8px">
+            <div style="width:20px;height:20px;border-radius:50%;background:rgba(0,229,255,.15);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:var(--cyan);flex-shrink:0">1</div>
+            <div class="filter-text"><div class="filter-name">Check NSE Sector Indices</div><div class="filter-desc">Note which sectors are up/down &gt;1% in pre-market</div></div>
+          </div>
+          <div class="filter-item" style="padding:6px 8px">
+            <div style="width:20px;height:20px;border-radius:50%;background:rgba(0,229,255,.15);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:var(--cyan);flex-shrink:0">2</div>
+            <div class="filter-text"><div class="filter-name">Tag Gainer/Loser Stocks</div><div class="filter-desc">List NSE pre-market gainers &amp; losers from NSE website</div></div>
+          </div>
+          <div class="filter-item" style="padding:6px 8px">
+            <div style="width:20px;height:20px;border-radius:50%;background:rgba(0,229,255,.15);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:var(--cyan);flex-shrink:0">3</div>
+            <div class="filter-text"><div class="filter-name">Update Indicator Settings</div><div class="filter-desc">Toggle sector bull/bear + enter % move in Pine Script settings</div></div>
+          </div>
+          <div class="filter-item" style="padding:6px 8px">
+            <div style="width:20px;height:20px;border-radius:50%;background:rgba(0,229,255,.15);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:var(--cyan);flex-shrink:0">4</div>
+            <div class="filter-text"><div class="filter-name">Set Alerts for Watchlist</div><div class="filter-desc">Apply indicator to each watchlist stock, set "Confirmed Long/Short" alert</div></div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div style="color:var(--amber);font-size:11px;font-weight:700;letter-spacing:1px;margin-bottom:10px;border-bottom:1px solid var(--border);padding-bottom:6px">INTRADAY TRADE DECISION TREE</div>
+        <div style="font-size:11px;line-height:2;color:#a0aec0">
+          <span style="color:var(--dim)">SIGNAL FIRES →</span><br>
+          <span style="color:var(--green)">▲ Confirmed Long</span> → Enter immediately, SL below ATR×1.5, TP at 2R<br>
+          <span style="color:var(--amber)">⚡ Early Long</span> → Enter small (50%), add on confirmation<br>
+          <span style="color:var(--cyan)">🔥 Squeeze Long</span> → Full size, expect 2-3× normal move<br>
+          <span style="color:var(--red)">▼ Confirmed Short</span> → Short/Put options, same sizing rules<br>
+          <br>
+          <span style="color:var(--dim)">SKIP TRADE IF →</span><br>
+          <span style="color:#4a5568">✗ Sector ↑ but stock in losers list</span><br>
+          <span style="color:#4a5568">✗ Vol ratio &lt; 1.0 (no institutional interest)</span><br>
+          <span style="color:#4a5568">✗ Squeeze still ON (wait for fire)</span><br>
+          <span style="color:#4a5568">✗ RSI &gt;75 (long) or &lt;25 (short) = exhaustion</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div><!-- end root -->
+
+<script>
+// ─── DATA ───────────────────────────────────────────────────────
+let sectors = [
+  {name:"Nifty Bank",     val:52418, chg:+1.82, signal:"LONG"},
+  {name:"Nifty IT",       val:38920, chg:+2.14, signal:"LONG"},
+  {name:"Nifty Auto",     val:24106, chg:+0.93, signal:"LONG"},
+  {name:"Nifty Pharma",   val:21845, chg:-1.47, signal:"SHORT"},
+  {name:"Nifty Metal",    val:9842,  chg:-2.31, signal:"SHORT"},
+  {name:"Nifty FMCG",     val:56201, chg:+0.42, signal:"WATCH"},
+  {name:"Nifty Energy",   val:41230, chg:-0.88, signal:"WATCH"},
+  {name:"Nifty Realty",   val:1024,  chg:+1.65, signal:"LONG"},
+  {name:"Nifty Media",    val:2103,  chg:-3.12, signal:"SHORT"},
+  {name:"Nifty PSU Bank", val:7845,  chg:+1.11, signal:"LONG"},
+];
+
+let gainers = [
+  {name:"HDFCBANK",  price:"1,742",  chg:"+3.21", sig:"LONG"},
+  {name:"INFY",      price:"1,890",  chg:"+2.87", sig:"LONG"},
+  {name:"TATAMOTORS",price:"968",    chg:"+2.45", sig:"LONG"},
+  {name:"AXISBANK",  price:"1,124",  chg:"+1.98", sig:"LONG"},
+  {name:"WIPRO",     price:"478",    chg:"+1.76", sig:"LONG"},
+  {name:"DLF",       price:"892",    chg:"+1.54", sig:"LONG"},
+  {name:"SBICARD",   price:"782",    chg:"+1.32", sig:"WATCH"},
+];
+
+let losers = [
+  {name:"SUNPHARMA",  price:"1,621", chg:"-2.89", sig:"SHORT"},
+  {name:"HINDALCO",   price:"672",   chg:"-2.34", sig:"SHORT"},
+  {name:"JSWSTEEL",   price:"894",   chg:"-2.01", sig:"SHORT"},
+  {name:"DRREDDY",    price:"6,420", chg:"-1.78", sig:"SHORT"},
+  {name:"COALINDIA",  price:"456",   chg:"-1.42", sig:"SHORT"},
+  {name:"NTPC",       price:"368",   chg:"-1.21", sig:"WATCH"},
+  {name:"TECHM",      price:"1,580", chg:"-0.98", sig:"WATCH"},
+];
+
+let tickerData = [
+  {name:"NIFTY 50", val:"24,215", chg:"+0.68%", up:true},
+  {name:"BANK NIFTY", val:"52,418", chg:"+1.82%", up:true},
+  {name:"NIFTY IT", val:"38,920", chg:"+2.14%", up:true},
+  {name:"NIFTY MID", val:"14,218", chg:"+0.41%", up:true},
+  {name:"NIFTY METAL", val:"9,842", chg:"-2.31%", up:false},
+  {name:"INDIA VIX", val:"12.4", chg:"-3.1%", up:false},
+  {name:"USD/INR", val:"83.42", chg:"+0.12%", up:false},
+  {name:"SGXNIFTY", val:"24,260", chg:"+0.71%", up:true},
+];
+
+let alerts = [
+  {time:"09:47", stock:"HDFCBANK", sig:"⚡ EARLY LONG",   type:"early", tf:"5m", price:"1742.50", reason:"EMA9×EMA21 + Bank sector +1.8%"},
+  {time:"09:52", stock:"INFY",     sig:"▲ CONFIRMED LONG",type:"conf",  tf:"5m", price:"1890.00", reason:"Breakout retest + IT sector +2.1% + Vol 2.4×"},
+  {time:"10:01", stock:"SUNPHARMA",sig:"▼ CONFIRMED SHORT",type:"short",tf:"15m",price:"1621.30", reason:"Support break + Pharma sector -1.5% + Vol 2.8×"},
+  {time:"10:08", stock:"TATAMOTORS",sig:"🔥 SQUEEZE LONG", type:"squeeze",tf:"5m",price:"968.20", reason:"Squeeze fired bullish + Auto sector +0.9%"},
+  {time:"10:15", stock:"JSWSTEEL", sig:"▼ CONFIRMED SHORT",type:"short",tf:"5m",price:"894.10", reason:"Breakdown + Metal sector -2.3% + Loser list"},
+];
+
+// ─── RENDER ─────────────────────────────────────────────────────
+function renderTicker(){
+  const bar = document.getElementById('ticker-bar');
+  bar.innerHTML = tickerData.map(t=>`
+    <div class="tick-item">
+      <div>
+        <div class="tick-name">${t.name}</div>
+        <div style="display:flex;align-items:baseline;gap:5px">
+          <div class="tick-val" style="color:${t.up?'var(--green)':'var(--red)'}">${t.val}</div>
+          <div class="tick-chg" style="color:${t.up?'var(--green)':'var(--red)'}">${t.chg}</div>
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+function renderSectors(){
+  const grid = document.getElementById('sector-grid');
+  const maxChg = Math.max(...sectors.map(s=>Math.abs(s.chg)));
+  grid.innerHTML = sectors.map(s=>{
+    const pct = Math.min(100, (Math.abs(s.chg)/maxChg)*100);
+    const isUp = s.chg > 0;
+    const sigColor = s.signal==='LONG' ? 'var(--green)' : s.signal==='SHORT' ? 'var(--red)' : 'var(--dim)';
+    return `<div class="sector-row ${s.signal==='LONG'?'active':s.signal==='SHORT'?'danger':''}">
+      <div class="sector-name">${s.name}</div>
+      <div class="sector-val" style="color:${isUp?'var(--green)':'var(--red)'}">${s.chg>0?'+':''}${s.chg}%</div>
+      <div>
+        <div class="sector-bar-wrap">
+          <div class="sector-bar ${isUp?'bar-green':'bar-red'}" style="width:${pct}%"></div>
+        </div>
+      </div>
+      <div style="text-align:right"><span class="badge ${s.signal==='LONG'?'badge-green':s.signal==='SHORT'?'badge-red':'badge-amber'}" style="font-size:8px">${s.signal}</span></div>
+    </div>`;
+  }).join('');
+
+  const longs = sectors.filter(s=>s.signal==='LONG').length;
+  const shorts = sectors.filter(s=>s.signal==='SHORT').length;
+  const badge = document.getElementById('sector-signal-badge');
+  if(longs > shorts){badge.textContent=`${longs} BULL`;badge.className='badge badge-green';}
+  else if(shorts > longs){badge.textContent=`${shorts} BEAR`;badge.className='badge badge-red';}
+}
+
+function renderStocks(){
+  document.getElementById('gainers-list').innerHTML = gainers.map(g=>`
+    <div class="stock-row gainer">
+      <div><div class="sname">${g.name}</div><div class="sprice">${g.price}</div></div>
+      <div class="spct" style="color:var(--green)">${g.chg}%</div>
+      <div style="text-align:right"><span class="badge ${g.sig==='LONG'?'badge-green':'badge-amber'}" style="font-size:8px">${g.sig}</span></div>
+      <div class="sicon" style="color:var(--green)">▲</div>
+    </div>`).join('');
+
+  document.getElementById('losers-list').innerHTML = losers.map(l=>`
+    <div class="stock-row loser">
+      <div><div class="sname">${l.name}</div><div class="sprice">${l.price}</div></div>
+      <div class="spct" style="color:var(--red)">${l.chg}%</div>
+      <div style="text-align:right"><span class="badge ${l.sig==='SHORT'?'badge-red':'badge-amber'}" style="font-size:8px">${l.sig}</span></div>
+      <div class="sicon" style="color:var(--red)">▼</div>
+    </div>`).join('');
+}
+
+function renderAlerts(){
+  const feed = document.getElementById('alerts-feed');
+  feed.innerHTML = alerts.map(a=>{
+    const colMap = {conf:'var(--green)',short:'var(--red)',early:'var(--amber)',squeeze:'var(--cyan)'};
+    const bgMap = {conf:'rgba(0,255,157,.06)',short:'rgba(255,68,102,.06)',early:'rgba(255,179,71,.06)',squeeze:'rgba(0,229,255,.06)'};
+    return `<div style="display:grid;grid-template-columns:40px 90px 1fr auto;gap:8px;align-items:center;
+      padding:7px 10px;border-radius:5px;background:${bgMap[a.type]};border:1px solid ${bgMap[a.type].replace('.06','.25')}">
+      <div style="font-size:10px;color:var(--dim)">${a.time}</div>
+      <div style="font-weight:700;color:#e2e8f0;font-size:11px">${a.stock}</div>
+      <div>
+        <div style="font-size:11px;font-weight:700;color:${colMap[a.type]}">${a.sig}</div>
+        <div style="font-size:9px;color:var(--dim);margin-top:1px">${a.reason}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:10px;color:var(--dim)">${a.tf}</div>
+        <div style="font-size:11px;color:#a0aec0">₹${a.price}</div>
+      </div>
+    </div>`;
+  }).join('');
+  document.getElementById('alert-count').textContent = alerts.length + ' SIGNALS';
+}
+
+// ─── PINE SCRIPT (FULL) ──────────────────────────────────────────
+const pineCode = `<span class="c-comment">// ═══════════════════════════════════════════════════════════════</span>
+<span class="c-comment">// NSE ADVANCED SCANNER PRO — Sector + Gainer/Loser Trend Catcher</span>
+<span class="c-comment">// Version 3.0 | Pine Script v5 | NSE India Optimized</span>
+<span class="c-comment">// Signals: Confirmed Long/Short · Early Long/Short · Squeeze Fire</span>
+<span class="c-comment">// Anti-Fakeout: HTF · Candle Body · Wick Filter · Vol Gate · Retest</span>
+<span class="c-comment">// ═══════════════════════════════════════════════════════════════</span>
+<span class="c-kw">//@version=</span><span class="c-num">5</span>
+<span class="c-fn">indicator</span>(<span class="c-str">"NSE Advanced Scanner Pro"</span>, <span class="c-var">shorttitle</span>=<span class="c-str">"NSE•PRO"</span>,
+         <span class="c-var">overlay</span>=<span class="c-bool">true</span>, <span class="c-var">max_labels_count</span>=<span class="c-num">500</span>, <span class="c-var">max_lines_count</span>=<span class="c-num">100</span>)
+
+<span class="c-comment">// ── GROUP 1: TIMEFRAME & EMA ─────────────────────────────────</span>
+<span class="c-var">grp1</span> = <span class="c-str">"📊 Trend & EMA Settings"</span>
+<span class="c-var">tf_htf</span>    = <span class="c-fn">input.timeframe</span>(<span class="c-str">"15"</span>,   <span class="c-str">"HTF Confirmation TF"</span>,   <span class="c-var">group</span>=<span class="c-var">grp1</span>)
+<span class="c-var">ema_fast</span>  = <span class="c-fn">input.int</span>(<span class="c-num">9</span>,         <span class="c-str">"Fast EMA"</span>,              <span class="c-var">group</span>=<span class="c-var">grp1</span>)
+<span class="c-var">ema_mid</span>   = <span class="c-fn">input.int</span>(<span class="c-num">21</span>,        <span class="c-str">"Mid EMA"</span>,               <span class="c-var">group</span>=<span class="c-var">grp1</span>)
+<span class="c-var">ema_slow</span>  = <span class="c-fn">input.int</span>(<span class="c-num">50</span>,        <span class="c-str">"Slow EMA"</span>,              <span class="c-var">group</span>=<span class="c-var">grp1</span>)
+<span class="c-var">ema_trend</span> = <span class="c-fn">input.int</span>(<span class="c-num">200</span>,       <span class="c-str">"Trend EMA (Filter)"</span>,    <span class="c-var">group</span>=<span class="c-var">grp1</span>)
+
+<span class="c-comment">// ── GROUP 2: VOLUME ──────────────────────────────────────────</span>
+<span class="c-var">grp2</span>          = <span class="c-str">"📦 Volume Settings"</span>
+<span class="c-var">vol_avg_len</span>   = <span class="c-fn">input.int</span>(<span class="c-num">20</span>,    <span class="c-str">"Volume Avg Length"</span>,         <span class="c-var">group</span>=<span class="c-var">grp2</span>)
+<span class="c-var">vol_mult_conf</span> = <span class="c-fn">input.float</span>(<span class="c-num">2.0</span>, <span class="c-str">"Confirmed Signal Vol Mult"</span>, <span class="c-var">group</span>=<span class="c-var">grp2</span>)
+<span class="c-var">vol_mult_early</span>= <span class="c-fn">input.float</span>(<span class="c-num">1.4</span>, <span class="c-str">"Early Signal Vol Mult"</span>,     <span class="c-var">group</span>=<span class="c-var">grp2</span>)
+
+<span class="c-comment">// ── GROUP 3: ANTI-FAKEOUT ────────────────────────────────────</span>
+<span class="c-var">grp3</span>          = <span class="c-str">"🛡 Anti Fake-Breakout Filters"</span>
+<span class="c-var">atr_period</span>    = <span class="c-fn">input.int</span>(<span class="c-num">14</span>,     <span class="c-str">"ATR Period"</span>,               <span class="c-var">group</span>=<span class="c-var">grp3</span>)
+<span class="c-var">body_pct_min</span>  = <span class="c-fn">input.float</span>(<span class="c-num">0.55</span>, <span class="c-str">"Min Candle Body Ratio"</span>,    <span class="c-var">group</span>=<span class="c-var">grp3</span>)
+<span class="c-var">wick_max_ratio</span>= <span class="c-fn">input.float</span>(<span class="c-num">0.40</span>, <span class="c-str">"Max Wick/Body Ratio"</span>,      <span class="c-var">group</span>=<span class="c-var">grp3</span>)
+<span class="c-var">pivot_lookback</span>= <span class="c-fn">input.int</span>(<span class="c-num">8</span>,     <span class="c-str">"Pivot Lookback (S/R)"</span>,     <span class="c-var">group</span>=<span class="c-var">grp3</span>)
+<span class="c-var">require_retest</span>= <span class="c-fn">input.bool</span>(<span class="c-bool">true</span>, <span class="c-str">"Require Breakout Retest"</span>,  <span class="c-var">group</span>=<span class="c-var">grp3</span>)
+<span class="c-var">retest_tol</span>    = <span class="c-fn">input.float</span>(<span class="c-num">0.5</span>, <span class="c-str">"Retest ATR Tolerance"</span>,     <span class="c-var">group</span>=<span class="c-var">grp3</span>)
+
+<span class="c-comment">// ── GROUP 4: SQUEEZE ─────────────────────────────────────────</span>
+<span class="c-var">grp4</span>     = <span class="c-str">"⚡ Momentum Squeeze"</span>
+<span class="c-var">use_sq</span>   = <span class="c-fn">input.bool</span>(<span class="c-bool">true</span>,  <span class="c-str">"Enable Squeeze Filter"</span>, <span class="c-var">group</span>=<span class="c-var">grp4</span>)
+<span class="c-var">bb_len</span>   = <span class="c-fn">input.int</span>(<span class="c-num">20</span>,   <span class="c-str">"BB Length"</span>,             <span class="c-var">group</span>=<span class="c-var">grp4</span>)
+<span class="c-var">bb_mult</span>  = <span class="c-fn">input.float</span>(<span class="c-num">2.0</span>,<span class="c-str">"BB Multiplier"</span>,         <span class="c-var">group</span>=<span class="c-var">grp4</span>)
+<span class="c-var">kc_len</span>   = <span class="c-fn">input.int</span>(<span class="c-num">20</span>,   <span class="c-str">"KC Length"</span>,             <span class="c-var">group</span>=<span class="c-var">grp4</span>)
+<span class="c-var">kc_mult</span>  = <span class="c-fn">input.float</span>(<span class="c-num">1.5</span>,<span class="c-str">"KC Multiplier"</span>,         <span class="c-var">group</span>=<span class="c-var">grp4</span>)
+
+<span class="c-comment">// ── GROUP 5: NSE SECTOR (Update Daily at Market Open) ────────</span>
+<span class="c-var">grp5</span>          = <span class="c-str">"🏭 NSE Sector Inputs (Update Daily)"</span>
+<span class="c-var">sector_bull</span>   = <span class="c-fn">input.bool</span>(<span class="c-bool">false</span>, <span class="c-str">"Sector is UP Today"</span>,    <span class="c-var">group</span>=<span class="c-var">grp5</span>)
+<span class="c-var">sector_bear</span>   = <span class="c-fn">input.bool</span>(<span class="c-bool">false</span>, <span class="c-str">"Sector is DOWN Today"</span>,  <span class="c-var">group</span>=<span class="c-var">grp5</span>)
+<span class="c-var">sector_pct</span>    = <span class="c-fn">input.float</span>(<span class="c-num">0.0</span>,  <span class="c-str">"Sector Move % (abs)"</span>,   <span class="c-var">group</span>=<span class="c-var">grp5</span>)
+<span class="c-var">sector_strong</span> = <span class="c-var">sector_pct</span> <span class="c-op">&gt;=</span> <span class="c-num">1.0</span>
+
+<span class="c-comment">// ── GROUP 6: NSE GAINER/LOSER TAG ───────────────────────────</span>
+<span class="c-var">grp6</span>         = <span class="c-str">"📈 NSE Gainer / Loser"</span>
+<span class="c-var">in_gainers</span>   = <span class="c-fn">input.bool</span>(<span class="c-bool">false</span>, <span class="c-str">"Stock in Top Gainers"</span>, <span class="c-var">group</span>=<span class="c-var">grp6</span>)
+<span class="c-var">in_losers</span>    = <span class="c-fn">input.bool</span>(<span class="c-bool">false</span>, <span class="c-str">"Stock in Top Losers"</span>,  <span class="c-var">group</span>=<span class="c-var">grp6</span>)
+<span class="c-var">nse_chg_pct</span>  = <span class="c-fn">input.float</span>(<span class="c-num">0.0</span>, <span class="c-str">"Stock % Change Today"</span>, <span class="c-var">group</span>=<span class="c-var">grp6</span>)
+
+<span class="c-comment">// ── GROUP 7: RISK MANAGEMENT ─────────────────────────────────</span>
+<span class="c-var">grp7</span>        = <span class="c-str">"💰 Risk Management"</span>
+<span class="c-var">show_levels</span> = <span class="c-fn">input.bool</span>(<span class="c-bool">true</span>,  <span class="c-str">"Show Entry/SL/TP"</span>, <span class="c-var">group</span>=<span class="c-var">grp7</span>)
+<span class="c-var">rr_ratio</span>    = <span class="c-fn">input.float</span>(<span class="c-num">2.0</span>,  <span class="c-str">"Risk:Reward Ratio"</span>,<span class="c-var">group</span>=<span class="c-var">grp7</span>)
+<span class="c-var">sl_atr_mult</span> = <span class="c-fn">input.float</span>(<span class="c-num">1.5</span>,  <span class="c-str">"SL × ATR"</span>,         <span class="c-var">group</span>=<span class="c-var">grp7</span>)
+
+<span class="c-comment">// ═══════════════ CALCULATIONS ═══════════════════════════════</span>
+
+<span class="c-comment">// EMAs — Current TF</span>
+<span class="c-var">e9</span>   = <span class="c-fn">ta.ema</span>(close, <span class="c-var">ema_fast</span>)
+<span class="c-var">e21</span>  = <span class="c-fn">ta.ema</span>(close, <span class="c-var">ema_mid</span>)
+<span class="c-var">e50</span>  = <span class="c-fn">ta.ema</span>(close, <span class="c-var">ema_slow</span>)
+<span class="c-var">e200</span> = <span class="c-fn">ta.ema</span>(close, <span class="c-var">ema_trend</span>)
+
+<span class="c-comment">// EMAs — Higher TF (no lookahead bias)</span>
+<span class="c-var">e9_h</span>  = <span class="c-fn">request.security</span>(syminfo.tickerid, <span class="c-var">tf_htf</span>, <span class="c-fn">ta.ema</span>(close,<span class="c-var">ema_fast</span>),  <span class="c-var">lookahead</span>=barmerge.lookahead_off)
+<span class="c-var">e21_h</span> = <span class="c-fn">request.security</span>(syminfo.tickerid, <span class="c-var">tf_htf</span>, <span class="c-fn">ta.ema</span>(close,<span class="c-var">ema_mid</span>),   <span class="c-var">lookahead</span>=barmerge.lookahead_off)
+<span class="c-var">e50_h</span> = <span class="c-fn">request.security</span>(syminfo.tickerid, <span class="c-var">tf_htf</span>, <span class="c-fn">ta.ema</span>(close,<span class="c-var">ema_slow</span>),  <span class="c-var">lookahead</span>=barmerge.lookahead_off)
+
+<span class="c-comment">// ATR & Volume</span>
+<span class="c-var">atr_val</span>      = <span class="c-fn">ta.atr</span>(<span class="c-var">atr_period</span>)
+<span class="c-var">avg_vol</span>      = <span class="c-fn">ta.sma</span>(volume, <span class="c-var">vol_avg_len</span>)
+<span class="c-var">vol_ratio</span>    = volume <span class="c-op">/</span> <span class="c-var">avg_vol</span>
+<span class="c-var">vol_ok_conf</span>  = <span class="c-var">vol_ratio</span> <span class="c-op">&gt;=</span> <span class="c-var">vol_mult_conf</span>
+<span class="c-var">vol_ok_early</span> = <span class="c-var">vol_ratio</span> <span class="c-op">&gt;=</span> <span class="c-var">vol_mult_early</span>
+
+<span class="c-comment">// RSI & MACD</span>
+<span class="c-var">rsi_val</span>         = <span class="c-fn">ta.rsi</span>(close, <span class="c-num">14</span>)
+<span class="c-var">rsi_bull</span>         = <span class="c-var">rsi_val</span> <span class="c-op">&gt;</span> <span class="c-num">45</span> <span class="c-kw">and</span> <span class="c-var">rsi_val</span> <span class="c-op">&lt;</span> <span class="c-num">72</span>
+<span class="c-var">rsi_bear</span>         = <span class="c-var">rsi_val</span> <span class="c-op">&lt;</span> <span class="c-num">55</span> <span class="c-kw">and</span> <span class="c-var">rsi_val</span> <span class="c-op">&gt;</span> <span class="c-num">28</span>
+[<span class="c-var">macd_l</span>, <span class="c-var">macd_s</span>, <span class="c-var">macd_h</span>] = <span class="c-fn">ta.macd</span>(close, <span class="c-num">12</span>, <span class="c-num">26</span>, <span class="c-num">9</span>)
+<span class="c-var">macd_bull</span>        = <span class="c-var">macd_l</span> <span class="c-op">&gt;</span> <span class="c-var">macd_s</span> <span class="c-kw">and</span> <span class="c-var">macd_h</span> <span class="c-op">&gt;</span> <span class="c-num">0</span>
+<span class="c-var">macd_bear</span>        = <span class="c-var">macd_l</span> <span class="c-op">&lt;</span> <span class="c-var">macd_s</span> <span class="c-kw">and</span> <span class="c-var">macd_h</span> <span class="c-op">&lt;</span> <span class="c-num">0</span>
+
+<span class="c-comment">// ── Candle Quality (Anti-Fakeout) ────────────────────────────</span>
+<span class="c-var">body</span>       = <span class="c-fn">math.abs</span>(close <span class="c-op">-</span> open)
+<span class="c-var">rng</span>        = high <span class="c-op">-</span> low
+<span class="c-var">body_ratio</span> = <span class="c-var">rng</span> <span class="c-op">&gt;</span> <span class="c-num">0</span> ? <span class="c-var">body</span> <span class="c-op">/</span> <span class="c-var">rng</span> : <span class="c-num">0</span>
+<span class="c-var">upper_wick</span> = high <span class="c-op">-</span> <span class="c-fn">math.max</span>(open, close)
+<span class="c-var">lower_wick</span> = <span class="c-fn">math.min</span>(open, close) <span class="c-op">-</span> low
+<span class="c-var">bull_body</span>  = close <span class="c-op">&gt;</span> open
+<span class="c-var">bear_body</span>  = close <span class="c-op">&lt;</span> open
+
+<span class="c-comment">// Strong bullish candle: dominant body, no rejection wick above</span>
+<span class="c-var">s_bull</span> = <span class="c-var">bull_body</span> <span class="c-kw">and</span> <span class="c-var">body_ratio</span> <span class="c-op">&gt;=</span> <span class="c-var">body_pct_min</span> <span class="c-kw">and</span>
+         (<span class="c-var">body</span> <span class="c-op">&gt;</span> <span class="c-num">0</span> ? <span class="c-var">upper_wick</span> <span class="c-op">/</span> <span class="c-var">body</span> <span class="c-op">&lt;</span> <span class="c-var">wick_max_ratio</span> : <span class="c-bool">false</span>)
+<span class="c-comment">// Strong bearish candle: dominant body, no rejection wick below</span>
+<span class="c-var">s_bear</span> = <span class="c-var">bear_body</span> <span class="c-kw">and</span> <span class="c-var">body_ratio</span> <span class="c-op">&gt;=</span> <span class="c-var">body_pct_min</span> <span class="c-kw">and</span>
+         (<span class="c-var">body</span> <span class="c-op">&gt;</span> <span class="c-num">0</span> ? <span class="c-var">lower_wick</span> <span class="c-op">/</span> <span class="c-var">body</span> <span class="c-op">&lt;</span> <span class="c-var">wick_max_ratio</span> : <span class="c-bool">false</span>)
+
+<span class="c-comment">// ── Trend Conditions ─────────────────────────────────────────</span>
+<span class="c-var">cur_bull</span>  = <span class="c-var">e9</span>   <span class="c-op">&gt;</span> <span class="c-var">e21</span>   <span class="c-kw">and</span> <span class="c-var">e21</span>   <span class="c-op">&gt;</span> <span class="c-var">e50</span>   <span class="c-kw">and</span> close <span class="c-op">&gt;</span> <span class="c-var">e200</span>
+<span class="c-var">cur_bear</span>  = <span class="c-var">e9</span>   <span class="c-op">&lt;</span> <span class="c-var">e21</span>   <span class="c-kw">and</span> <span class="c-var">e21</span>   <span class="c-op">&lt;</span> <span class="c-var">e50</span>   <span class="c-kw">and</span> close <span class="c-op">&lt;</span> <span class="c-var">e200</span>
+<span class="c-var">htf_bull</span>  = <span class="c-var">e9_h</span> <span class="c-op">&gt;</span> <span class="c-var">e21_h</span> <span class="c-kw">and</span> <span class="c-var">e21_h</span> <span class="c-op">&gt;</span> <span class="c-var">e50_h</span>
+<span class="c-var">htf_bear</span>  = <span class="c-var">e9_h</span> <span class="c-op">&lt;</span> <span class="c-var">e21_h</span> <span class="c-kw">and</span> <span class="c-var">e21_h</span> <span class="c-op">&lt;</span> <span class="c-var">e50_h</span>
+<span class="c-comment">// Early cross: EMA9 crosses EMA21 while above/below EMA50</span>
+<span class="c-var">early_bull_x</span> = <span class="c-fn">ta.crossover</span>(<span class="c-var">e9</span>,  <span class="c-var">e21</span>) <span class="c-kw">and</span> close <span class="c-op">&gt;</span> <span class="c-var">e50</span>
+<span class="c-var">early_bear_x</span> = <span class="c-fn">ta.crossunder</span>(<span class="c-var">e9</span>, <span class="c-var">e21</span>) <span class="c-kw">and</span> close <span class="c-op">&lt;</span> <span class="c-var">e50</span>
+
+<span class="c-comment">// ── Pivot S/R Levels ─────────────────────────────────────────</span>
+<span class="c-var">ph</span> = <span class="c-fn">ta.pivothigh</span>(high, <span class="c-var">pivot_lookback</span>, <span class="c-var">pivot_lookback</span>)
+<span class="c-var">pl</span> = <span class="c-fn">ta.pivotlow</span>(low,  <span class="c-var">pivot_lookback</span>, <span class="c-var">pivot_lookback</span>)
+<span class="c-kw">var float</span> <span class="c-var">res</span> = na
+<span class="c-kw">var float</span> <span class="c-var">sup</span> = na
+<span class="c-kw">if not</span> <span class="c-fn">na</span>(<span class="c-var">ph</span>) => <span class="c-var">res</span> := <span class="c-var">ph</span>
+<span class="c-kw">if not</span> <span class="c-fn">na</span>(<span class="c-var">pl</span>) => <span class="c-var">sup</span> := <span class="c-var">pl</span>
+<span class="c-var">broke_res</span> = <span class="c-op">not</span> <span class="c-fn">na</span>(<span class="c-var">res</span>) <span class="c-kw">and</span> close <span class="c-op">&gt;</span> <span class="c-var">res</span> <span class="c-kw">and</span> close[<span class="c-num">1</span>] <span class="c-op">&lt;=</span> <span class="c-var">res</span>
+<span class="c-var">broke_sup</span> = <span class="c-op">not</span> <span class="c-fn">na</span>(<span class="c-var">sup</span>) <span class="c-kw">and</span> close <span class="c-op">&lt;</span> <span class="c-var">sup</span> <span class="c-kw">and</span> close[<span class="c-num">1</span>] <span class="c-op">&gt;=</span> <span class="c-var">sup</span>
+<span class="c-comment">// Retest: price returns to broken level within ATR tolerance</span>
+<span class="c-kw">var float</span> <span class="c-var">br</span> = na
+<span class="c-kw">var float</span> <span class="c-var">bs</span> = na
+<span class="c-kw">if</span> <span class="c-var">broke_res</span> => <span class="c-var">br</span> := <span class="c-var">res</span>
+<span class="c-kw">if</span> <span class="c-var">broke_sup</span> => <span class="c-var">bs</span> := <span class="c-var">sup</span>
+<span class="c-var">retest_L</span> = <span class="c-op">not</span> <span class="c-fn">na</span>(<span class="c-var">br</span>) <span class="c-kw">and</span> <span class="c-fn">math.abs</span>(close<span class="c-op">-</span><span class="c-var">br</span>) <span class="c-op">&lt;=</span> <span class="c-var">atr_val</span><span class="c-op">*</span><span class="c-var">retest_tol</span> <span class="c-kw">and</span> <span class="c-var">bull_body</span>
+<span class="c-var">retest_S</span> = <span class="c-op">not</span> <span class="c-fn">na</span>(<span class="c-var">bs</span>) <span class="c-kw">and</span> <span class="c-fn">math.abs</span>(close<span class="c-op">-</span><span class="c-var">bs</span>) <span class="c-op">&lt;=</span> <span class="c-var">atr_val</span><span class="c-op">*</span><span class="c-var">retest_tol</span> <span class="c-kw">and</span> <span class="c-var">bear_body</span>
+
+<span class="c-comment">// ── Momentum Squeeze (TTM-Style) ──────────────────────────────</span>
+<span class="c-var">bb_u</span>    = <span class="c-fn">ta.sma</span>(close,<span class="c-var">bb_len</span>) <span class="c-op">+</span> <span class="c-var">bb_mult</span> <span class="c-op">*</span> <span class="c-fn">ta.stdev</span>(close,<span class="c-var">bb_len</span>)
+<span class="c-var">bb_l</span>    = <span class="c-fn">ta.sma</span>(close,<span class="c-var">bb_len</span>) <span class="c-op">-</span> <span class="c-var">bb_mult</span> <span class="c-op">*</span> <span class="c-fn">ta.stdev</span>(close,<span class="c-var">bb_len</span>)
+<span class="c-var">kc_u</span>    = <span class="c-fn">ta.ema</span>(close,<span class="c-var">kc_len</span>)  <span class="c-op">+</span> <span class="c-var">kc_mult</span> <span class="c-op">*</span> <span class="c-var">atr_val</span>
+<span class="c-var">kc_l</span>    = <span class="c-fn">ta.ema</span>(close,<span class="c-var">kc_len</span>)  <span class="c-op">-</span> <span class="c-var">kc_mult</span> <span class="c-op">*</span> <span class="c-var">atr_val</span>
+<span class="c-var">sq_on</span>   = <span class="c-var">bb_u</span> <span class="c-op">&lt;</span> <span class="c-var">kc_u</span> <span class="c-kw">and</span> <span class="c-var">bb_l</span> <span class="c-op">&gt;</span> <span class="c-var">kc_l</span>  <span class="c-comment">// BB inside KC = compressed</span>
+<span class="c-var">sq_off</span>  = <span class="c-var">bb_u</span> <span class="c-op">&gt;</span> <span class="c-var">kc_u</span> <span class="c-kw">and</span> <span class="c-var">bb_l</span> <span class="c-op">&lt;</span> <span class="c-var">kc_l</span>  <span class="c-comment">// BB outside KC = released</span>
+<span class="c-var">sq_fire</span> = <span class="c-var">sq_off</span> <span class="c-kw">and</span> (<span class="c-var">bb_u</span>[<span class="c-num">1</span>] <span class="c-op">&lt;</span> <span class="c-var">kc_u</span>[<span class="c-num">1</span>]) <span class="c-comment">// Just transitioned</span>
+<span class="c-var">mom</span>     = close <span class="c-op">-</span> <span class="c-fn">ta.avg</span>(<span class="c-fn">ta.avg</span>(<span class="c-fn">ta.highest</span>(high,<span class="c-num">20</span>),<span class="c-fn">ta.lowest</span>(low,<span class="c-num">20</span>)),<span class="c-fn">ta.sma</span>(close,<span class="c-num">20</span>))
+<span class="c-var">sq_bull</span> = <span class="c-var">sq_fire</span> <span class="c-kw">and</span> <span class="c-var">mom</span> <span class="c-op">&gt;</span> <span class="c-num">0</span>
+<span class="c-var">sq_bear</span> = <span class="c-var">sq_fire</span> <span class="c-kw">and</span> <span class="c-var">mom</span> <span class="c-op">&lt;</span> <span class="c-num">0</span>
+
+<span class="c-comment">// ── Sector-Stock Alignment ────────────────────────────────────</span>
+<span class="c-var">sec_long</span>    = <span class="c-var">sector_bull</span> <span class="c-kw">and</span> (<span class="c-var">in_gainers</span> <span class="c-kw">or</span> <span class="c-var">nse_chg_pct</span> <span class="c-op">&gt;</span> <span class="c-num">0.5</span>)
+<span class="c-var">sec_short</span>   = <span class="c-var">sector_bear</span> <span class="c-kw">and</span> (<span class="c-var">in_losers</span>  <span class="c-kw">or</span> <span class="c-var">nse_chg_pct</span> <span class="c-op">&lt;</span> <span class="c-op">-</span><span class="c-num">0.5</span>)
+<span class="c-var">no_conflict</span> = <span class="c-op">not</span>(<span class="c-var">sector_bull</span> <span class="c-kw">and</span> <span class="c-var">in_losers</span>) <span class="c-kw">and</span> <span class="c-op">not</span>(<span class="c-var">sector_bear</span> <span class="c-kw">and</span> <span class="c-var">in_gainers</span>)
+
+<span class="c-comment">// ═══════════════ SIGNALS ════════════════════════════════════</span>
+
+<span class="c-comment">// ▲ CONFIRMED LONG — all 8 filters must pass</span>
+<span class="c-var">conf_long</span> = <span class="c-var">htf_bull</span> <span class="c-kw">and</span> <span class="c-var">cur_bull</span> <span class="c-kw">and</span>
+  (<span class="c-var">require_retest</span> ? <span class="c-var">retest_L</span> : <span class="c-var">broke_res</span>) <span class="c-kw">and</span> <span class="c-var">s_bull</span> <span class="c-kw">and</span>
+  <span class="c-var">vol_ok_conf</span> <span class="c-kw">and</span> <span class="c-var">rsi_bull</span> <span class="c-kw">and</span> <span class="c-var">macd_bull</span> <span class="c-kw">and</span>
+  (<span class="c-op">not</span> <span class="c-var">use_sq</span> <span class="c-kw">or</span> <span class="c-op">not</span> <span class="c-var">sq_on</span>) <span class="c-kw">and</span> <span class="c-var">no_conflict</span>
+
+<span class="c-comment">// ▼ CONFIRMED SHORT — all bearish filters pass</span>
+<span class="c-var">conf_short</span> = <span class="c-var">htf_bear</span> <span class="c-kw">and</span> <span class="c-var">cur_bear</span> <span class="c-kw">and</span>
+  (<span class="c-var">require_retest</span> ? <span class="c-var">retest_S</span> : <span class="c-var">broke_sup</span>) <span class="c-kw">and</span> <span class="c-var">s_bear</span> <span class="c-kw">and</span>
+  <span class="c-var">vol_ok_conf</span> <span class="c-kw">and</span> <span class="c-var">rsi_bear</span> <span class="c-kw">and</span> <span class="c-var">macd_bear</span> <span class="c-kw">and</span>
+  (<span class="c-op">not</span> <span class="c-var">use_sq</span> <span class="c-kw">or</span> <span class="c-op">not</span> <span class="c-var">sq_on</span>) <span class="c-kw">and</span> <span class="c-var">no_conflict</span>
+
+<span class="c-comment">// ⚡ EARLY LONG — catch trend at EMA crossover inception</span>
+<span class="c-var">early_long</span> = <span class="c-var">htf_bull</span> <span class="c-kw">and</span> <span class="c-var">early_bull_x</span> <span class="c-kw">and</span> close <span class="c-op">&gt;</span> <span class="c-var">e50</span> <span class="c-kw">and</span>
+  <span class="c-var">vol_ok_early</span> <span class="c-kw">and</span> <span class="c-var">rsi_val</span> <span class="c-op">&gt;</span> <span class="c-num">45</span> <span class="c-kw">and</span> (<span class="c-op">not</span> <span class="c-var">macd_bear</span>) <span class="c-kw">and</span> <span class="c-var">no_conflict</span>
+
+<span class="c-comment">// ⚡ EARLY SHORT — catch trend down early</span>
+<span class="c-var">early_short</span> = <span class="c-var">htf_bear</span> <span class="c-kw">and</span> <span class="c-var">early_bear_x</span> <span class="c-kw">and</span> close <span class="c-op">&lt;</span> <span class="c-var">e50</span> <span class="c-kw">and</span>
+  <span class="c-var">vol_ok_early</span> <span class="c-kw">and</span> <span class="c-var">rsi_val</span> <span class="c-op">&lt;</span> <span class="c-num">55</span> <span class="c-kw">and</span> (<span class="c-op">not</span> <span class="c-var">macd_bull</span>) <span class="c-kw">and</span> <span class="c-var">no_conflict</span>
+
+<span class="c-comment">// 🔥 SQUEEZE FIRE — explosive momentum release</span>
+<span class="c-var">sq_long</span>  = <span class="c-var">sq_bull</span> <span class="c-kw">and</span> <span class="c-var">htf_bull</span> <span class="c-kw">and</span> <span class="c-var">vol_ok_early</span> <span class="c-kw">and</span> <span class="c-var">no_conflict</span>
+<span class="c-var">sq_short</span> = <span class="c-var">sq_bear</span> <span class="c-kw">and</span> <span class="c-var">htf_bear</span> <span class="c-kw">and</span> <span class="c-var">vol_ok_early</span> <span class="c-kw">and</span> <span class="c-var">no_conflict</span>
+
+<span class="c-comment">// ═══════════════ PLOTS ══════════════════════════════════════</span>
+
+<span class="c-fn">plot</span>(<span class="c-var">e9</span>,   <span class="c-str">"EMA 9"</span>,   <span class="c-fn">color.new</span>(#FFD700,<span class="c-num">0</span>), <span class="c-num">1</span>)
+<span class="c-fn">plot</span>(<span class="c-var">e21</span>,  <span class="c-str">"EMA 21"</span>,  <span class="c-fn">color.new</span>(#00BFFF,<span class="c-num">0</span>), <span class="c-num">1</span>)
+<span class="c-fn">plot</span>(<span class="c-var">e50</span>,  <span class="c-str">"EMA 50"</span>,  <span class="c-fn">color.new</span>(#FF8C00,<span class="c-num">0</span>), <span class="c-num">2</span>)
+<span class="c-fn">plot</span>(<span class="c-var">e200</span>, <span class="c-str">"EMA 200"</span>, <span class="c-fn">color.new</span>(#FF4444,<span class="c-num">0</span>), <span class="c-num">2</span>)
+<span class="c-fn">plot</span>(<span class="c-var">res</span>,  <span class="c-str">"Resistance"</span>, <span class="c-fn">color.new</span>(color.red,  <span class="c-num">60</span>), style=plot.style_linebr)
+<span class="c-fn">plot</span>(<span class="c-var">sup</span>,  <span class="c-str">"Support"</span>,    <span class="c-fn">color.new</span>(color.green,<span class="c-num">60</span>), style=plot.style_linebr)
+
+<span class="c-fn">plotshape</span>(<span class="c-var">conf_long</span>,  <span class="c-str">"LONG"</span>,       shape.labelup,     location.belowbar, <span class="c-fn">color.new</span>(#00C853,<span class="c-num">0</span>), text=<span class="c-str">"▲ LONG"</span>,   textcolor=color.white, size=size.normal)
+<span class="c-fn">plotshape</span>(<span class="c-var">conf_short</span>, <span class="c-str">"SHORT"</span>,      shape.labeldown,   location.abovebar, <span class="c-fn">color.new</span>(#D50000,<span class="c-num">0</span>), text=<span class="c-str">"▼ SHORT"</span>,  textcolor=color.white, size=size.normal)
+<span class="c-fn">plotshape</span>(<span class="c-var">early_long</span>, <span class="c-str">"Early L"</span>,   shape.triangleup,  location.belowbar, <span class="c-fn">color.new</span>(#69F0AE,<span class="c-num">20</span>),text=<span class="c-str">"⚡L"</span>,       textcolor=color.white, size=size.small)
+<span class="c-fn">plotshape</span>(<span class="c-var">early_short</span>,<span class="c-str">"Early S"</span>,   shape.triangledown,location.abovebar, <span class="c-fn">color.new</span>(#FF6D00,<span class="c-num">20</span>),text=<span class="c-str">"⚡S"</span>,       textcolor=color.white, size=size.small)
+<span class="c-fn">plotshape</span>(<span class="c-var">sq_long</span>,    <span class="c-str">"SQ Long"</span>,   shape.circle,      location.belowbar, <span class="c-fn">color.new</span>(#00E5FF,<span class="c-num">0</span>), text=<span class="c-str">"SQ↑"</span>,      textcolor=color.white, size=size.small)
+<span class="c-fn">plotshape</span>(<span class="c-var">sq_short</span>,   <span class="c-str">"SQ Short"</span>,  shape.circle,      location.abovebar, <span class="c-fn">color.new</span>(#FF4081,<span class="c-num">0</span>), text=<span class="c-str">"SQ↓"</span>,      textcolor=color.white, size=size.small)
+
+<span class="c-fn">plot</span>(<span class="c-var">use_sq</span> <span class="c-kw">and</span> <span class="c-var">sq_on</span>   ? low  <span class="c-op">-</span> <span class="c-var">atr_val</span><span class="c-op">*</span><span class="c-num">.5</span> : na, <span class="c-str">"SQ On"</span>,   color.orange, style=plot.style_circles, linewidth=<span class="c-num">3</span>)
+<span class="c-fn">plot</span>(<span class="c-var">use_sq</span> <span class="c-kw">and</span> <span class="c-var">sq_fire</span> ? low  <span class="c-op">-</span> <span class="c-var">atr_val</span><span class="c-op">*</span><span class="c-num">.5</span> : na, <span class="c-str">"SQ Fire"</span>, color.aqua,   style=plot.style_circles, linewidth=<span class="c-num">4</span>)
+<span class="c-fn">barcolor</span>(<span class="c-var">vol_ok_conf</span> ? <span class="c-fn">color.new</span>(color.yellow,<span class="c-num">75</span>) : na)
+<span class="c-fn">bgcolor</span>(<span class="c-var">sec_long</span>  <span class="c-kw">and</span> <span class="c-var">sector_strong</span> ? <span class="c-fn">color.new</span>(color.green,<span class="c-num">92</span>) : na, <span class="c-var">title</span>=<span class="c-str">"Sector Bull BG"</span>)
+<span class="c-fn">bgcolor</span>(<span class="c-var">sec_short</span> <span class="c-kw">and</span> <span class="c-var">sector_strong</span> ? <span class="c-fn">color.new</span>(color.red,  <span class="c-num">92</span>) : na, <span class="c-var">title</span>=<span class="c-str">"Sector Bear BG"</span>)
+
+<span class="c-comment">// ─── Entry / SL / TP Labels ──────────────────────────────────</span>
+<span class="c-kw">var</span> <span class="c-var">line</span>  <span class="c-var">sl_ln</span> = na, <span class="c-var">tp_ln</span> = na
+<span class="c-kw">var</span> <span class="c-var">label</span> <span class="c-var">e_lb</span>  = na, <span class="c-var">s_lb</span>  = na, <span class="c-var">t_lb</span>  = na
+
+<span class="c-fn">f_levels</span>(entry, sl, tp) =>
+    <span class="c-kw">if</span> <span class="c-op">not</span> <span class="c-fn">na</span>(<span class="c-var">sl_ln</span>) => <span class="c-fn">line.delete</span>(<span class="c-var">sl_ln</span>)
+    <span class="c-kw">if</span> <span class="c-op">not</span> <span class="c-fn">na</span>(<span class="c-var">tp_ln</span>) => <span class="c-fn">line.delete</span>(<span class="c-var">tp_ln</span>)
+    <span class="c-kw">if</span> <span class="c-op">not</span> <span class="c-fn">na</span>(<span class="c-var">e_lb</span>)  => <span class="c-fn">label.delete</span>(<span class="c-var">e_lb</span>)
+    <span class="c-kw">if</span> <span class="c-op">not</span> <span class="c-fn">na</span>(<span class="c-var">s_lb</span>)  => <span class="c-fn">label.delete</span>(<span class="c-var">s_lb</span>)
+    <span class="c-kw">if</span> <span class="c-op">not</span> <span class="c-fn">na</span>(<span class="c-var">t_lb</span>)  => <span class="c-fn">label.delete</span>(<span class="c-var">t_lb</span>)
+    <span class="c-var">sl_ln</span> := <span class="c-fn">line.new</span>(bar_index, sl, bar_index<span class="c-op">+</span><span class="c-num">20</span>, sl, <span class="c-var">color</span>=color.red,   <span class="c-var">style</span>=line.style_dashed)
+    <span class="c-var">tp_ln</span> := <span class="c-fn">line.new</span>(bar_index, tp, bar_index<span class="c-op">+</span><span class="c-num">20</span>, tp, <span class="c-var">color</span>=color.green, <span class="c-var">style</span>=line.style_dashed)
+    <span class="c-var">e_lb</span>  := <span class="c-fn">label.new</span>(bar_index<span class="c-op">+</span><span class="c-num">1</span>, entry, <span class="c-str">"ENTRY "  </span><span class="c-op">+</span> <span class="c-fn">str.tostring</span>(entry, <span class="c-str">"#.##"</span>), <span class="c-var">color</span>=<span class="c-fn">color.new</span>(color.blue, <span class="c-num">50</span>),  <span class="c-var">textcolor</span>=color.white, <span class="c-var">style</span>=label.style_label_left)
+    <span class="c-var">s_lb</span>  := <span class="c-fn">label.new</span>(bar_index<span class="c-op">+</span><span class="c-num">1</span>, sl,    <span class="c-str">"SL ⚠ "   </span><span class="c-op">+</span> <span class="c-fn">str.tostring</span>(sl,    <span class="c-str">"#.##"</span>), <span class="c-var">color</span>=<span class="c-fn">color.new</span>(color.red,  <span class="c-num">50</span>),  <span class="c-var">textcolor</span>=color.white, <span class="c-var">style</span>=label.style_label_left)
+    <span class="c-var">t_lb</span>  := <span class="c-fn">label.new</span>(bar_index<span class="c-op">+</span><span class="c-num">1</span>, tp,    <span class="c-str">"TP 🎯 "  </span><span class="c-op">+</span> <span class="c-fn">str.tostring</span>(tp,    <span class="c-str">"#.##"</span>), <span class="c-var">color</span>=<span class="c-fn">color.new</span>(color.green,<span class="c-num">50</span>),  <span class="c-var">textcolor</span>=color.white, <span class="c-var">style</span>=label.style_label_left)
+
+<span class="c-kw">if</span> <span class="c-var">show_levels</span>
+    <span class="c-kw">if</span> <span class="c-var">conf_long</span> <span class="c-kw">or</span> <span class="c-var">early_long</span> <span class="c-kw">or</span> <span class="c-var">sq_long</span>
+        <span class="c-var">sl_p</span> = close <span class="c-op">-</span> <span class="c-var">atr_val</span> <span class="c-op">*</span> <span class="c-var">sl_atr_mult</span>
+        <span class="c-fn">f_levels</span>(close, <span class="c-var">sl_p</span>, close <span class="c-op">+</span> (close<span class="c-op">-</span><span class="c-var">sl_p</span>) <span class="c-op">*</span> <span class="c-var">rr_ratio</span>)
+    <span class="c-kw">if</span> <span class="c-var">conf_short</span> <span class="c-kw">or</span> <span class="c-var">early_short</span> <span class="c-kw">or</span> <span class="c-var">sq_short</span>
+        <span class="c-var">sl_p</span> = close <span class="c-op">+</span> <span class="c-var">atr_val</span> <span class="c-op">*</span> <span class="c-var">sl_atr_mult</span>
+        <span class="c-fn">f_levels</span>(close, <span class="c-var">sl_p</span>, close <span class="c-op">-</span> (<span class="c-var">sl_p</span><span class="c-op">-</span>close) <span class="c-op">*</span> <span class="c-var">rr_ratio</span>)
+
+<span class="c-comment">// ─── Dashboard Table (Top Right) ─────────────────────────────</span>
+<span class="c-kw">var</span> <span class="c-var">table</span> <span class="c-var">t</span> = <span class="c-fn">table.new</span>(position.top_right, <span class="c-num">3</span>, <span class="c-num">10</span>,
+  <span class="c-var">bgcolor</span>=<span class="c-fn">color.new</span>(#<span class="c-num">0</span>D1117,<span class="c-num">10</span>), <span class="c-var">border_color</span>=<span class="c-fn">color.new</span>(color.gray,<span class="c-num">60</span>), <span class="c-var">border_width</span>=<span class="c-num">1</span>)
+
+<span class="c-kw">if</span> barstate.islast
+    <span class="c-fn">table.cell</span>(<span class="c-var">t</span>,<span class="c-num">0</span>,<span class="c-num">0</span>,<span class="c-str">"NSE PRO"</span>,            <span class="c-var">text_color</span>=<span class="c-fn">color.new</span>(#<span class="c-num">00</span>E5FF,<span class="c-num">0</span>), <span class="c-var">bgcolor</span>=<span class="c-fn">color.new</span>(#<span class="c-num">1</span>C2333,<span class="c-num">0</span>), <span class="c-var">text_size</span>=size.small)
+    <span class="c-fn">table.cell</span>(<span class="c-var">t</span>,<span class="c-num">1</span>,<span class="c-num">0</span>,syminfo.ticker,          <span class="c-var">text_color</span>=color.yellow,                 <span class="c-var">bgcolor</span>=<span class="c-fn">color.new</span>(#<span class="c-num">1</span>C2333,<span class="c-num">0</span>), <span class="c-var">text_size</span>=size.small)
+    <span class="c-fn">table.cell</span>(<span class="c-var">t</span>,<span class="c-num">2</span>,<span class="c-num">0</span>,timeframe.period<span class="c-op">+</span><span class="c-str">"m"</span>,    <span class="c-var">text_color</span>=color.gray,                   <span class="c-var">bgcolor</span>=<span class="c-fn">color.new</span>(#<span class="c-num">1</span>C2333,<span class="c-num">0</span>), <span class="c-var">text_size</span>=size.small)
+    <span class="c-fn">table.cell</span>(<span class="c-var">t</span>,<span class="c-num">0</span>,<span class="c-num">1</span>,<span class="c-str">"HTF Trend"</span>,          <span class="c-var">text_color</span>=color.gray, <span class="c-var">text_size</span>=size.small)
+    <span class="c-fn">table.cell</span>(<span class="c-var">t</span>,<span class="c-num">1</span>,<span class="c-num">1</span>,<span class="c-var">htf_bull</span>?<span class="c-str">"BULL ▲"</span>:<span class="c-var">htf_bear</span>?<span class="c-str">"BEAR ▼"</span>:<span class="c-str">"FLAT"</span>,
+      <span class="c-var">text_color</span>=<span class="c-var">htf_bull</span>?color.lime:<span class="c-var">htf_bear</span>?color.red:color.gray, <span class="c-var">text_size</span>=size.small)
+    <span class="c-fn">table.cell</span>(<span class="c-var">t</span>,<span class="c-num">2</span>,<span class="c-num">1</span>,<span class="c-var">htf_bull</span><span class="c-kw">or</span><span class="c-var">htf_bear</span>?<span class="c-str">"✔"</span>:<span class="c-str">"✘"</span>,
+      <span class="c-var">text_color</span>=<span class="c-var">htf_bull</span><span class="c-kw">or</span><span class="c-var">htf_bear</span>?color.lime:color.red, <span class="c-var">text_size</span>=size.small)
+    <span class="c-fn">table.cell</span>(<span class="c-var">t</span>,<span class="c-num">0</span>,<span class="c-num">2</span>,<span class="c-str">"Vol Ratio"</span>,         <span class="c-var">text_color</span>=color.gray, <span class="c-var">text_size</span>=size.small)
+    <span class="c-fn">table.cell</span>(<span class="c-var">t</span>,<span class="c-num">1</span>,<span class="c-num">2</span>,<span class="c-fn">str.tostring</span>(<span class="c-fn">math.round</span>(<span class="c-var">vol_ratio</span>,<span class="c-num">2</span>))<span class="c-op">+</span><span class="c-str">"×"</span>,
+      <span class="c-var">text_color</span>=<span class="c-var">vol_ok_conf</span>?color.lime:<span class="c-var">vol_ok_early</span>?color.yellow:color.red, <span class="c-var">text_size</span>=size.small)
+    <span class="c-fn">table.cell</span>(<span class="c-var">t</span>,<span class="c-num">2</span>,<span class="c-num">2</span>,<span class="c-var">vol_ok_conf</span>?<span class="c-str">"✔✔"</span>:<span class="c-var">vol_ok_early</span>?<span class="c-str">"✔"</span>:<span class="c-str">"✘"</span>,
+      <span class="c-var">text_color</span>=<span class="c-var">vol_ok_conf</span>?color.lime:<span class="c-var">vol_ok_early</span>?color.yellow:color.red, <span class="c-var">text_size</span>=size.small)
+    <span class="c-fn">table.cell</span>(<span class="c-var">t</span>,<span class="c-num">0</span>,<span class="c-num">3</span>,<span class="c-str">"RSI"</span>,               <span class="c-var">text_color</span>=color.gray, <span class="c-var">text_size</span>=size.small)
+    <span class="c-fn">table.cell</span>(<span class="c-var">t</span>,<span class="c-num">1</span>,<span class="c-num">3</span>,<span class="c-fn">str.tostring</span>(<span class="c-fn">math.round</span>(<span class="c-var">rsi_val</span>,<span class="c-num">1</span>)),
+      <span class="c-var">text_color</span>=<span class="c-var">rsi_bull</span>?color.lime:<span class="c-var">rsi_bear</span>?color.red:color.yellow, <span class="c-var">text_size</span>=size.small)
+    <span class="c-fn">table.cell</span>(<span class="c-var">t</span>,<span class="c-num">0</span>,<span class="c-num">4</span>,<span class="c-str">"Squeeze"</span>,           <span class="c-var">text_color</span>=color.gray, <span class="c-var">text_size</span>=size.small)
+    <span class="c-fn">table.cell</span>(<span class="c-var">t</span>,<span class="c-num">1</span>,<span class="c-num">4</span>,<span class="c-var">sq_on</span>?<span class="c-str">"ON ⏳"</span>:<span class="c-var">sq_fire</span>?<span class="c-str">"FIRED"</span>:<span class="c-str">"OFF"</span>,
+      <span class="c-var">text_color</span>=<span class="c-var">sq_on</span>?color.orange:<span class="c-var">sq_fire</span>?color.aqua:color.gray, <span class="c-var">text_size</span>=size.small)
+    <span class="c-var">sig_txt</span>  = <span class="c-var">conf_long</span>?<span class="c-str">"▲ CONF LONG"</span>:<span class="c-var">conf_short</span>?<span class="c-str">"▼ CONF SHORT"</span>:
+               <span class="c-var">sq_long</span>?<span class="c-str">"🔥 SQ LONG"</span>:<span class="c-var">sq_short</span>?<span class="c-str">"🔥 SQ SHORT"</span>:
+               <span class="c-var">early_long</span>?<span class="c-str">"⚡ EARLY L"</span>:<span class="c-var">early_short</span>?<span class="c-str">"⚡ EARLY S"</span>:<span class="c-str">"◆ WAIT"</span>
+    <span class="c-var">sig_clr</span>  = <span class="c-var">conf_long</span><span class="c-kw">or</span><span class="c-var">sq_long</span><span class="c-kw">or</span><span class="c-var">early_long</span>  ? color.lime :
+               <span class="c-var">conf_short</span><span class="c-kw">or</span><span class="c-var">sq_short</span><span class="c-kw">or</span><span class="c-var">early_short</span> ? color.red  : color.gray
+    <span class="c-fn">table.cell</span>(<span class="c-var">t</span>,<span class="c-num">0</span>,<span class="c-num">9</span>,<span class="c-str">"SIGNAL"</span>,   <span class="c-var">text_color</span>=color.gray,  <span class="c-var">text_size</span>=size.small)
+    <span class="c-fn">table.cell</span>(<span class="c-var">t</span>,<span class="c-num">1</span>,<span class="c-num">9</span>,<span class="c-var">sig_txt</span>,   <span class="c-var">text_color</span>=<span class="c-var">sig_clr</span>,   <span class="c-var">text_size</span>=size.small)
+
+<span class="c-comment">// ═══════════════ ALERTS ═════════════════════════════════════</span>
+<span class="c-fn">alertcondition</span>(<span class="c-var">conf_long</span>,  <span class="c-str">"✦ CONFIRMED LONG"</span>,   <span class="c-str">"LONG on {{ticker}} @ {{close}} | Vol {{volume}}"</span>)
+<span class="c-fn">alertcondition</span>(<span class="c-var">conf_short</span>, <span class="c-str">"✦ CONFIRMED SHORT"</span>,  <span class="c-str">"SHORT on {{ticker}} @ {{close}} | Vol {{volume}}"</span>)
+<span class="c-fn">alertcondition</span>(<span class="c-var">early_long</span>, <span class="c-str">"⚡ EARLY LONG"</span>,       <span class="c-str">"Early LONG {{ticker}} — EMA cross @ {{close}}"</span>)
+<span class="c-fn">alertcondition</span>(<span class="c-var">early_short</span>,<span class="c-str">"⚡ EARLY SHORT"</span>,      <span class="c-str">"Early SHORT {{ticker}} — EMA cross @ {{close}}"</span>)
+<span class="c-fn">alertcondition</span>(<span class="c-var">sq_long</span>,    <span class="c-str">"🔥 SQUEEZE LONG"</span>,    <span class="c-str">"Squeeze fired BULL {{ticker}} @ {{close}}"</span>)
+<span class="c-fn">alertcondition</span>(<span class="c-var">sq_short</span>,   <span class="c-str">"🔥 SQUEEZE SHORT"</span>,   <span class="c-str">"Squeeze fired BEAR {{ticker}} @ {{close}}"</span>)
+<span class="c-fn">alertcondition</span>(<span class="c-var">retest_L</span>,   <span class="c-str">"↩ RETEST LONG"</span>,     <span class="c-str">"Retest long {{ticker}} @ {{close}}"</span>)
+<span class="c-fn">alertcondition</span>(<span class="c-var">retest_S</span>,   <span class="c-str">"↩ RETEST SHORT"</span>,    <span class="c-str">"Retest short {{ticker}} @ {{close}}"</span>)`;
+
+// ─── TABS & COPY ─────────────────────────────────────────────────
+function showTab(name, el){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  ['main','setup','alerts','workflow'].forEach(id=>{
+    const el2 = document.getElementById('tab-'+id);
+    if(el2) el2.style.display = id===name ? 'block' : 'none';
+  });
+}
+
+function copyCode(tabId){
+  const el = document.getElementById(tabId);
+  const text = el.innerText || el.textContent;
+  navigator.clipboard.writeText(text).then(()=>{
+    const btn = el.previousElementSibling;
+    btn.textContent='COPIED!';btn.classList.add('copied');
+    setTimeout(()=>{btn.textContent='COPY';btn.classList.remove('copied')},2000);
+  });
+}
+
+function setTf(tf, btn){
+  document.querySelectorAll('.tf-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+// ─── INIT ────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', ()=>{
+  renderTicker();
+  renderSectors();
+  renderStocks();
+  renderAlerts();
+  document.getElementById('code-main').innerHTML = pineCode;
+
+  // Real live data from the local NSE proxy (server.py)
+  refreshLive();
+  setInterval(refreshLive, 10000);   // every 10s
+});
+
+async function refreshLive(){
+  try{
+    const r = await fetch('/api/dashboard', {cache:'no-store'});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const d = await r.json();
+
+    if(d.indices && d.indices.length) sectors    = d.indices;
+    if(d.ticker  && d.ticker.length ) tickerData = d.ticker;
+    if(d.gainers && d.gainers.length) gainers    = d.gainers;
+    if(d.losers  && d.losers.length ) losers     = d.losers;
+    if(d.movers  && d.movers.length ) alerts     = d.movers;
+
+    renderTicker(); renderSectors(); renderStocks(); renderAlerts();
+    if(d.nifty) setHeaderChip('nifty',  d.nifty);
+    if(d.bank)  setHeaderChip('sensex', d.bank);   // chip relabelled BANK NIFTY
+    setLiveStatus(d.status, d.asOf);
+  }catch(e){
+    setLiveStatus('error', e.message);
+  }
+}
+
+function setHeaderChip(id, q){
+  const v = document.getElementById(id+'-val');
+  const c = document.getElementById(id+'-chg');
+  if(v) v.textContent = q.val;
+  if(c){ c.textContent = q.chg; c.style.color = q.up ? 'var(--green)' : 'var(--red)'; }
+}
+
+function setLiveStatus(status, info){
+  const b = document.querySelector('.live-badge');
+  if(!b) return;
+  const map = {
+    live:   ['● LIVE'            , 'var(--red)'  ],
+    closed: ['● MARKET CLOSED · last close', 'var(--amber)'],
+    stale:  ['● RECONNECTING'    , 'var(--amber)'],
+    error:  ['● PROXY OFFLINE'   , 'var(--dim)'  ],
+  };
+  const [txt, col] = map[status] || map.error;
+  b.textContent = info && status==='live' ? `${txt} · ${info}` : txt;
+  b.style.color = col;
+  b.style.borderColor = col;
+}
+</script>
+</body>
+</html>
