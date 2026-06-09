@@ -345,6 +345,7 @@
     <div class="tab" onclick="showTab('alerts',this)">Alert Conditions</div>
     <div class="tab" onclick="showTab('workflow',this)">Daily Workflow</div>
     <div class="tab" onclick="showTab('backtest',this)" style="color:var(--gold)">🔬 Backtest (5Y)</div>
+    <div class="tab" onclick="showTab('finder',this)" style="color:var(--green)">🎯 Trade Finder</div>
   </div>
 
   <!-- TAB: MAIN CODE -->
@@ -554,6 +555,27 @@
     </div>
     <div id="bt-chips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px"></div>
     <div id="bt-results"></div>
+  </div>
+
+  <!-- TAB: TRADE FINDER -->
+  <div id="tab-finder" class="code-block" style="display:none;padding:16px">
+    <div style="margin-bottom:12px">
+      <div style="color:var(--green);font-size:12px;font-weight:700;letter-spacing:1px">🎯 TRADE FINDER · SECTOR + GAINER/LOSER + 200 EMA CONFLUENCE</div>
+      <div style="color:var(--dim);font-size:10px;margin-top:3px;max-width:760px;line-height:1.55">
+        Automates the workflow: which sector is up → which moving stock is in it → is it a gainer/loser → does the 200 EMA confirm.
+        A <b style="color:var(--green)">3/3 setup</b> = stock + its sector + the 200 EMA all agree. Live during market hours (else last close).
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+      <select id="tf-universe" onchange="runTradeFinder()" style="background:#050a10;border:1px solid var(--green);color:var(--green);padding:8px 12px;border-radius:5px;font-family:inherit;font-size:13px;cursor:pointer">
+        <option value="nifty50">NIFTY 50</option>
+        <option value="fo">F&O universe</option>
+      </select>
+      <button onclick="runTradeFinder()" style="background:var(--green);color:#050a10;border:none;padding:8px 18px;border-radius:5px;font-weight:700;cursor:pointer;font-family:inherit;font-size:12px;letter-spacing:.5px">SCAN ▶</button>
+      <label style="font-size:11px;color:#a0aec0;cursor:pointer"><input type="checkbox" id="tf-setuponly" onchange="renderTradeFinder(_tfData)" style="vertical-align:middle"> only full 3/3 setups</label>
+      <span id="tf-status" style="font-size:11px;color:var(--dim)"></span>
+    </div>
+    <div id="tf-results"></div>
   </div>
 </div>
 
@@ -960,10 +982,63 @@ const pineCode = `<span class="c-comment">// ═══════════�
 function showTab(name, el){
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
-  ['main','setup','alerts','workflow','backtest'].forEach(id=>{
+  ['main','setup','alerts','workflow','backtest','finder'].forEach(id=>{
     const el2 = document.getElementById('tab-'+id);
     if(el2) el2.style.display = id===name ? 'block' : 'none';
   });
+  if(name==='finder' && !_tfData) runTradeFinder();
+}
+
+// ─── TRADE FINDER ─────────────────────────────────────────────────
+let _tfData = null;
+async function runTradeFinder(){
+  const status = document.getElementById('tf-status');
+  const out = document.getElementById('tf-results');
+  const uni = document.getElementById('tf-universe').value;
+  status.textContent='Scanning sectors + movers + 200 EMA…'; status.style.color='var(--amber)';
+  out.innerHTML='';
+  try{
+    const r = await fetch('/api/tradefinder?universe='+uni, {cache:'no-store'});
+    const d = await r.json();
+    if(!d.ok){ status.textContent=d.error||'Failed'; status.style.color='var(--red)'; return; }
+    status.textContent='as of '+d.asOf; status.style.color='var(--dim)';
+    renderTradeFinder(d);
+  }catch(e){ status.textContent='Error: '+e.message; status.style.color='var(--red)'; }
+}
+
+function renderTradeFinder(d){
+  if(!d) return; _tfData = d;
+  const only = document.getElementById('tf-setuponly')?.checked;
+  let rows = d.rows;
+  if(only) rows = rows.filter(r=>r.setup==='LONG'||r.setup==='SHORT');
+  const nLong = d.rows.filter(r=>r.setup==='LONG').length;
+  const nShort = d.rows.filter(r=>r.setup==='SHORT').length;
+  const badge = s => {
+    if(s==='LONG')  return '<span style="background:rgba(0,255,157,.15);color:var(--green);border:1px solid rgba(0,255,157,.4);padding:1px 7px;border-radius:3px;font-weight:700;font-size:10px">▲ LONG 3/3</span>';
+    if(s==='SHORT') return '<span style="background:rgba(255,68,102,.15);color:var(--red);border:1px solid rgba(255,68,102,.4);padding:1px 7px;border-radius:3px;font-weight:700;font-size:10px">▼ SHORT 3/3</span>';
+    if(s==='WATCH-L') return '<span style="color:var(--green);font-size:10px">watch ↑ 2/3</span>';
+    if(s==='WATCH-S') return '<span style="color:var(--red);font-size:10px">watch ↓ 2/3</span>';
+    return '<span style="color:var(--dim);font-size:10px">—</span>';
+  };
+  const emaCol = r => r.ema_state==='Above'?'var(--green)':r.ema_state==='Below'?'var(--red)':'var(--amber)';
+  const body = rows.map(r=>{
+    const full = r.setup==='LONG'||r.setup==='SHORT';
+    const tint = r.setup==='LONG'?'background:rgba(0,255,157,.06)':r.setup==='SHORT'?'background:rgba(255,68,102,.06)':'';
+    return `<tr style="cursor:pointer;${tint}" onclick="document.querySelector('.tab[onclick*=backtest]').click();document.getElementById('bt-symbol').value='${r.symbol}';runBacktest();">
+      <td style="font-weight:700;color:#e2e8f0">${full?'★ ':''}${r.symbol}</td>
+      <td style="color:${r.chg>=0?'var(--green)':'var(--red)'};text-align:right;font-weight:700">${r.chg>=0?'+':''}${r.chg}%</td>
+      <td style="color:#a0aec0">${r.sector}</td>
+      <td style="text-align:right;color:${r.sector_chg==null?'var(--dim)':r.sector_chg>=0?'var(--green)':'var(--red)'}">${r.sector_chg==null?'—':(r.sector_chg>=0?'+':'')+r.sector_chg+'%'}</td>
+      <td style="text-align:center;color:${emaCol(r)};font-weight:700">${r.ema_state}${r.ema_dist!=null?' <span style="color:var(--dim);font-weight:400">('+(r.ema_dist>=0?'+':'')+r.ema_dist+'%)</span>':''}</td>
+      <td style="text-align:center">${badge(r.setup)}</td></tr>`;
+  }).join('') || `<tr><td colspan="6" style="text-align:center;color:var(--dim);padding:14px">No movers match.</td></tr>`;
+  document.getElementById('tf-results').innerHTML =
+    `<div style="font-size:11px;color:#a0aec0;margin-bottom:8px">
+       <b style="color:var(--green)">${nLong} LONG</b> &nbsp; <b style="color:var(--red)">${nShort} SHORT</b> full 3/3 setups · ${d.rows.length} movers scanned · click a row to backtest it</div>
+     <div style="max-height:560px;overflow:auto;border:1px solid var(--border);border-radius:6px">
+       <table class="matrix" style="width:100%">
+         <thead><tr><th>Stock</th><th style="text-align:right">Day %</th><th>Sector</th><th style="text-align:right">Sector %</th><th style="text-align:center">200 EMA</th><th style="text-align:center">Confluence</th></tr></thead>
+         <tbody>${body}</tbody></table></div>`;
 }
 
 // ─── BACKTEST ────────────────────────────────────────────────────

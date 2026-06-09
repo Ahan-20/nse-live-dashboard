@@ -1,0 +1,611 @@
+{
+"AUBANK": [
+"Nifty Bank"
+],
+"AXISBANK": [
+"Nifty Bank",
+"Nifty Financial Services"
+],
+"BANKBARODA": [
+"Nifty Bank",
+"Nifty PSU Bank"
+],
+"CANBK": [
+"Nifty Bank",
+"Nifty PSU Bank"
+],
+"FEDERALBNK": [
+"Nifty Bank"
+],
+"HDFCBANK": [
+"Nifty Bank",
+"Nifty Financial Services"
+],
+"ICICIBANK": [
+"Nifty Bank",
+"Nifty Financial Services"
+],
+"IDFCFIRSTB": [
+"Nifty Bank"
+],
+"INDUSINDBK": [
+"Nifty Bank"
+],
+"KOTAKBANK": [
+"Nifty Bank",
+"Nifty Financial Services"
+],
+"PNB": [
+"Nifty Bank",
+"Nifty PSU Bank"
+],
+"SBIN": [
+"Nifty Bank",
+"Nifty PSU Bank",
+"Nifty Financial Services"
+],
+"UNIONBANK": [
+"Nifty Bank",
+"Nifty PSU Bank"
+],
+"YESBANK": [
+"Nifty Bank"
+],
+"COFORGE": [
+"Nifty IT"
+],
+"HCLTECH": [
+"Nifty IT"
+],
+"INFY": [
+"Nifty IT"
+],
+"LTM": [
+"Nifty IT"
+],
+"MPHASIS": [
+"Nifty IT"
+],
+"OFSS": [
+"Nifty IT"
+],
+"PERSISTENT": [
+"Nifty IT"
+],
+"TCS": [
+"Nifty IT"
+],
+"TECHM": [
+"Nifty IT"
+],
+"WIPRO": [
+"Nifty IT"
+],
+"ASHOKLEY": [
+"Nifty Auto"
+],
+"BAJAJ-AUTO": [
+"Nifty Auto"
+],
+"BHARATFORG": [
+"Nifty Auto"
+],
+"BOSCHLTD": [
+"Nifty Auto"
+],
+"EICHERMOT": [
+"Nifty Auto"
+],
+"EXIDEIND": [
+"Nifty Auto"
+],
+"HEROMOTOCO": [
+"Nifty Auto"
+],
+"M&M": [
+"Nifty Auto"
+],
+"MARUTI": [
+"Nifty Auto"
+],
+"MOTHERSON": [
+"Nifty Auto"
+],
+"SONACOMS": [
+"Nifty Auto"
+],
+"TVSMOTOR": [
+"Nifty Auto"
+],
+"TMPV": [
+"Nifty Auto"
+],
+"TIINDIA": [
+"Nifty Auto"
+],
+"UNOMINDA": [
+"Nifty Auto"
+],
+"ABBOTINDIA": [
+"Nifty Pharma",
+"Nifty Healthcare"
+],
+"AJANTPHARM": [
+"Nifty Pharma"
+],
+"ALKEM": [
+"Nifty Pharma",
+"Nifty Healthcare"
+],
+"AUROPHARMA": [
+"Nifty Pharma",
+"Nifty Healthcare"
+],
+"BIOCON": [
+"Nifty Pharma",
+"Nifty Healthcare"
+],
+"CIPLA": [
+"Nifty Pharma",
+"Nifty Healthcare"
+],
+"DIVISLAB": [
+"Nifty Pharma",
+"Nifty Healthcare"
+],
+"DRREDDY": [
+"Nifty Pharma",
+"Nifty Healthcare"
+],
+"GLAND": [
+"Nifty Pharma"
+],
+"GLENMARK": [
+"Nifty Pharma",
+"Nifty Healthcare"
+],
+"IPCALAB": [
+"Nifty Pharma",
+"Nifty Healthcare"
+],
+"JBCHEPHARM": [
+"Nifty Pharma"
+],
+"LAURUSLABS": [
+"Nifty Pharma",
+"Nifty Healthcare"
+],
+"LUPIN": [
+"Nifty Pharma",
+"Nifty Healthcare"
+],
+"MANKIND": [
+"Nifty Pharma",
+"Nifty Healthcare"
+],
+"PPLPHARMA": [
+"Nifty Pharma",
+"Nifty Healthcare"
+],
+"SUNPHARMA": [
+"Nifty Pharma",
+"Nifty Healthcare"
+],
+"TORNTPHARM": [
+"Nifty Pharma",
+"Nifty Healthcare"
+],
+"WOCKPHARMA": [
+"Nifty Pharma"
+],
+"ZYDUSLIFE": [
+"Nifty Pharma",
+"Nifty Healthcare"
+],
+"APLAPOLLO": [
+"Nifty Metal"
+],
+"ADANIENT": [
+"Nifty Metal"
+],
+"HINDALCO": [
+"Nifty Metal"
+],
+"HINDCOPPER": [
+"Nifty Metal"
+],
+"HINDZINC": [
+"Nifty Metal"
+],
+"JSWSTEEL": [
+"Nifty Metal"
+],
+"JSL": [
+"Nifty Metal"
+],
+"JINDALSTEL": [
+"Nifty Metal"
+],
+"LLOYDSME": [
+"Nifty Metal"
+],
+"NMDC": [
+"Nifty Metal"
+],
+"NATIONALUM": [
+"Nifty Metal"
+],
+"SAIL": [
+"Nifty Metal"
+],
+"TATASTEEL": [
+"Nifty Metal"
+],
+"VEDL": [
+"Nifty Metal"
+],
+"WELCORP": [
+"Nifty Metal"
+],
+"BRITANNIA": [
+"Nifty FMCG"
+],
+"COLPAL": [
+"Nifty FMCG"
+],
+"DABUR": [
+"Nifty FMCG"
+],
+"EMAMILTD": [
+"Nifty FMCG"
+],
+"GODREJCP": [
+"Nifty FMCG"
+],
+"HINDUNILVR": [
+"Nifty FMCG"
+],
+"ITC": [
+"Nifty FMCG"
+],
+"MARICO": [
+"Nifty FMCG"
+],
+"NESTLEIND": [
+"Nifty FMCG"
+],
+"PATANJALI": [
+"Nifty FMCG"
+],
+"RADICO": [
+"Nifty FMCG"
+],
+"TATACONSUM": [
+"Nifty FMCG"
+],
+"UBL": [
+"Nifty FMCG"
+],
+"UNITDSPR": [
+"Nifty FMCG"
+],
+"VBL": [
+"Nifty FMCG"
+],
+"ABB": [
+"Nifty Energy"
+],
+"ADANIENSOL": [
+"Nifty Energy"
+],
+"ADANIGREEN": [
+"Nifty Energy"
+],
+"ADANIPOWER": [
+"Nifty Energy"
+],
+"ATGL": [
+"Nifty Energy",
+"Nifty Oil & Gas"
+],
+"AEGISLOG": [
+"Nifty Energy",
+"Nifty Oil & Gas"
+],
+"BHEL": [
+"Nifty Energy"
+],
+"BPCL": [
+"Nifty Energy",
+"Nifty Oil & Gas"
+],
+"CESC": [
+"Nifty Energy"
+],
+"CGPOWER": [
+"Nifty Energy"
+],
+"CASTROLIND": [
+"Nifty Energy",
+"Nifty Oil & Gas"
+],
+"COALINDIA": [
+"Nifty Energy"
+],
+"GAIL": [
+"Nifty Energy",
+"Nifty Oil & Gas"
+],
+"GVT&D": [
+"Nifty Energy"
+],
+"HINDPETRO": [
+"Nifty Energy",
+"Nifty Oil & Gas"
+],
+"POWERINDIA": [
+"Nifty Energy"
+],
+"IOC": [
+"Nifty Energy",
+"Nifty Oil & Gas"
+],
+"IGL": [
+"Nifty Energy",
+"Nifty Oil & Gas"
+],
+"INOXWIND": [
+"Nifty Energy"
+],
+"JSWENERGY": [
+"Nifty Energy"
+],
+"JPPOWER": [
+"Nifty Energy"
+],
+"MGL": [
+"Nifty Energy",
+"Nifty Oil & Gas"
+],
+"NHPC": [
+"Nifty Energy"
+],
+"NLCINDIA": [
+"Nifty Energy"
+],
+"NTPCGREEN": [
+"Nifty Energy"
+],
+"NTPC": [
+"Nifty Energy"
+],
+"NAVA": [
+"Nifty Energy"
+],
+"ONGC": [
+"Nifty Energy",
+"Nifty Oil & Gas"
+],
+"OIL": [
+"Nifty Energy",
+"Nifty Oil & Gas"
+],
+"PETRONET": [
+"Nifty Energy",
+"Nifty Oil & Gas"
+],
+"POWERGRID": [
+"Nifty Energy"
+],
+"RELIANCE": [
+"Nifty Energy",
+"Nifty Oil & Gas"
+],
+"RPOWER": [
+"Nifty Energy"
+],
+"SJVN": [
+"Nifty Energy"
+],
+"ENRIN": [
+"Nifty Energy"
+],
+"SIEMENS": [
+"Nifty Energy"
+],
+"SUZLON": [
+"Nifty Energy"
+],
+"TATAPOWER": [
+"Nifty Energy"
+],
+"THERMAX": [
+"Nifty Energy"
+],
+"TORNTPOWER": [
+"Nifty Energy"
+],
+"ABREL": [
+"Nifty Realty"
+],
+"ANANTRAJ": [
+"Nifty Realty"
+],
+"BRIGADE": [
+"Nifty Realty"
+],
+"DLF": [
+"Nifty Realty"
+],
+"GODREJPROP": [
+"Nifty Realty"
+],
+"LODHA": [
+"Nifty Realty"
+],
+"OBEROIRLTY": [
+"Nifty Realty"
+],
+"PHOENIXLTD": [
+"Nifty Realty"
+],
+"PRESTIGE": [
+"Nifty Realty"
+],
+"SOBHA": [
+"Nifty Realty"
+],
+"DBCORP": [
+"Nifty Media"
+],
+"HATHWAY": [
+"Nifty Media"
+],
+"NAZARA": [
+"Nifty Media"
+],
+"NETWORK18": [
+"Nifty Media"
+],
+"PVRINOX": [
+"Nifty Media"
+],
+"PFOCUS": [
+"Nifty Media"
+],
+"SAREGAMA": [
+"Nifty Media"
+],
+"SUNTV": [
+"Nifty Media"
+],
+"TIPSMUSIC": [
+"Nifty Media"
+],
+"ZEEL": [
+"Nifty Media"
+],
+"BANKINDIA": [
+"Nifty PSU Bank"
+],
+"MAHABANK": [
+"Nifty PSU Bank"
+],
+"CENTRALBK": [
+"Nifty PSU Bank"
+],
+"INDIANB": [
+"Nifty PSU Bank"
+],
+"IOB": [
+"Nifty PSU Bank"
+],
+"PSB": [
+"Nifty PSU Bank"
+],
+"UCOBANK": [
+"Nifty PSU Bank"
+],
+"BSE": [
+"Nifty Financial Services"
+],
+"BAJFINANCE": [
+"Nifty Financial Services"
+],
+"BAJAJFINSV": [
+"Nifty Financial Services"
+],
+"CHOLAFIN": [
+"Nifty Financial Services"
+],
+"HDFCLIFE": [
+"Nifty Financial Services"
+],
+"ICICIGI": [
+"Nifty Financial Services"
+],
+"JIOFIN": [
+"Nifty Financial Services"
+],
+"LICHSGFIN": [
+"Nifty Financial Services"
+],
+"MFSL": [
+"Nifty Financial Services"
+],
+"MUTHOOTFIN": [
+"Nifty Financial Services"
+],
+"PFC": [
+"Nifty Financial Services"
+],
+"RECLTD": [
+"Nifty Financial Services"
+],
+"SBICARD": [
+"Nifty Financial Services"
+],
+"SBILIFE": [
+"Nifty Financial Services"
+],
+"SHRIRAMFIN": [
+"Nifty Financial Services"
+],
+"APOLLOHOSP": [
+"Nifty Healthcare"
+],
+"FORTIS": [
+"Nifty Healthcare"
+],
+"MAXHEALTH": [
+"Nifty Healthcare"
+],
+"SYNGENE": [
+"Nifty Healthcare"
+],
+"AMBER": [
+"Nifty Consumer Durables"
+],
+"BATAINDIA": [
+"Nifty Consumer Durables"
+],
+"BLUESTARCO": [
+"Nifty Consumer Durables"
+],
+"CROMPTON": [
+"Nifty Consumer Durables"
+],
+"DIXON": [
+"Nifty Consumer Durables"
+],
+"HAVELLS": [
+"Nifty Consumer Durables"
+],
+"KAJARIACER": [
+"Nifty Consumer Durables"
+],
+"KALYANKJIL": [
+"Nifty Consumer Durables"
+],
+"LGEINDIA": [
+"Nifty Consumer Durables"
+],
+"PGEL": [
+"Nifty Consumer Durables"
+],
+"TITAN": [
+"Nifty Consumer Durables"
+],
+"VOLTAS": [
+"Nifty Consumer Durables"
+],
+"WHIRLPOOL": [
+"Nifty Consumer Durables"
+],
+"AEGISVOPAK": [
+"Nifty Oil & Gas"
+],
+"CHENNPETRO": [
+"Nifty Oil & Gas"
+]
+}

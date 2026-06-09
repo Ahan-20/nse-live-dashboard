@@ -245,6 +245,104 @@ NIFTY50 = ["ADANIENT", "ADANIPORTS", "APOLLOHOSP", "ASIANPAINT", "AXISBANK",
            "TATACONSUM", "TMPV", "TATASTEEL", "TECHM", "TITAN", "TRENT",
            "ULTRACEMCO", "WIPRO"]
 
+# ── Trade Finder: sector + gainer/loser + 200 EMA confluence ─────────
+try:
+    with open(os.path.join(HERE, "sector_map.json")) as _f:
+        SECTOR_MAP = json.load(_f)
+except Exception:
+    SECTOR_MAP = {}
+
+_ema_cache = {}
+
+
+def ema200_last(symbol):
+    """(200-EMA, last close) from the historical DB. Cached (daily-static)."""
+    if symbol in _ema_cache:
+        return _ema_cache[symbol]
+    try:
+        bars = bt.load(symbol)
+        if len(bars) >= 200:
+            closes = [b["c"] for b in bars]
+            res = (bt.ema(closes, 200)[-1], closes[-1])
+        else:
+            res = (None, None)
+    except Exception:
+        res = (None, None)
+    _ema_cache[symbol] = res
+    return res
+
+
+def _movers(kind, bucket):
+    d = nse_get("/api/live-analysis-variations?index=" + kind)
+    return (d.get(bucket) or {}).get("data", [])
+
+
+def build_tradefinder(universe):
+    bucket = "NIFTY" if universe == "nifty50" else "FOSec"
+    all_idx = nse_get("/api/allIndices")
+    by_name = {r.get("index"): float(r.get("percentChange", 0))
+               for r in all_idx.get("data", [])}
+
+    def sdir(disp):
+        return by_name.get(disp.upper())
+
+    stocks = {}
+    for s in _movers("gainers", bucket):
+        stocks[s.get("symbol")] = s
+    for s in _movers("loosers", bucket):
+        stocks.setdefault(s.get("symbol"), s)
+
+    rows = []
+    for sym, s in stocks.items():
+        if not sym:
+            continue
+        ch = float(s.get("perChange", 0))
+        ltp = float(s.get("ltp", 0) or 0)
+        secs = SECTOR_MAP.get(sym, [])
+        secdirs = [(d, sdir(d)) for d in secs if sdir(d) is not None]
+        rep = max(secdirs, key=lambda x: abs(x[1])) if secdirs else None
+        ema, _ = ema200_last(sym)
+        if ema and ltp:
+            dist = (ltp - ema) / ema * 100
+            ema_state = "Near" if abs(dist) < 1 else ("Above" if dist > 0 else "Below")
+        else:
+            dist, ema_state = None, "?"
+        sec_up = rep[1] > 0 if rep else None
+        long_setup = ch > 0 and sec_up is True and ema_state == "Above"
+        short_setup = ch < 0 and sec_up is False and ema_state == "Below"
+        # confluence score: stock dir, sector dir, EMA all agree (out of 3)
+        if ch >= 0:
+            score = (1) + (1 if sec_up else 0) + (1 if ema_state == "Above" else 0)
+            setup = "LONG" if long_setup else ("WATCH-L" if score >= 2 else "")
+        else:
+            score = (1) + (1 if sec_up is False else 0) + (1 if ema_state == "Below" else 0)
+            setup = "SHORT" if short_setup else ("WATCH-S" if score >= 2 else "")
+        rows.append({
+            "symbol": sym, "chg": round(ch, 2), "ltp": round(ltp, 2),
+            "side": "gainer" if ch >= 0 else "loser",
+            "sector": rep[0] if rep else "—",
+            "sector_chg": round(rep[1], 2) if rep else None,
+            "ema_state": ema_state, "ema_dist": round(dist, 2) if dist is not None else None,
+            "setup": setup, "score": score,
+        })
+    rows.sort(key=lambda r: (r["score"], abs(r["chg"])), reverse=True)
+    return {"ok": True, "universe": universe, "asOf": (all_idx.get("timestamp", "") or "")[-8:],
+            "rows": rows}
+
+
+_tf_cache = {"t": 0.0, "data": {}}
+
+
+def cached_tradefinder(universe):
+    now = time.time()
+    if universe in _tf_cache["data"] and now - _tf_cache["t"] < 30:
+        return _tf_cache["data"][universe]
+    d = build_tradefinder(universe)
+    _tf_cache["data"][universe] = d
+    _tf_cache["t"] = now
+    return d
+
+
 # ── backtest cache (deterministic per symbol + parameter set) ────────
 _bt_cache = {}
 
@@ -329,6 +427,15 @@ class Handler(BaseHTTPRequestHandler):
                                      is not None else -1e9), reverse=True)
             body = json.dumps({"ok": True, "rows": rows, "config": config})
             return self._send(200, body.encode("utf-8"), "application/json")
+        if self.path.startswith("/api/tradefinder"):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            uni = q.get("universe", ["nifty50"])[0]
+            uni = uni if uni in ("nifty50", "fo") else "nifty50"
+            try:
+                rep = cached_tradefinder(uni)
+            except Exception as e:
+                rep = {"ok": False, "error": str(e), "rows": []}
+            return self._send(200, json.dumps(rep).encode("utf-8"), "application/json")
         if self.path.startswith("/api/exitcompare"):
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             labels = {"cross": "Opposite 200 EMA cross", "sltp": "ATR stop + R:R target",
