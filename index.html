@@ -568,10 +568,11 @@
   <!-- TAB: TRADE FINDER -->
   <div id="tab-finder" class="code-block" style="display:none;padding:16px">
     <div style="margin-bottom:12px">
-      <div style="color:var(--green);font-size:12px;font-weight:700;letter-spacing:1px">🎯 TRADE FINDER · SECTOR + GAINER/LOSER + 200 EMA CONFLUENCE</div>
-      <div style="color:var(--dim);font-size:10px;margin-top:3px;max-width:760px;line-height:1.55">
-        Automates the workflow: which sector is up → which moving stock is in it → is it a gainer/loser → does the 200 EMA confirm.
-        A <b style="color:var(--green)">3/3 setup</b> = stock + its sector + the 200 EMA all agree. Live during market hours (else last close).
+      <div style="color:var(--green);font-size:12px;font-weight:700;letter-spacing:1px">🎯 TRADE FINDER · FRESH 200 EMA CROSSES TODAY</div>
+      <div style="color:var(--dim);font-size:10px;margin-top:3px;max-width:780px;line-height:1.55">
+        The workflow: (1) read the <b>sector heat</b> → (2) scan NSE <b>gainers/losers</b> → (3) of those, which are
+        <b style="color:var(--green)">crossing the 200 EMA TODAY</b> — a fresh signal you can act on now, not an old cross from days ago.
+        A <b style="color:var(--green)">LONG/SHORT</b> badge = fresh cross + the stock's move + its sector all agree.
       </div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
@@ -580,7 +581,7 @@
         <option value="fo">F&O universe</option>
       </select>
       <button onclick="runTradeFinder()" style="background:var(--green);color:#050a10;border:none;padding:8px 18px;border-radius:5px;font-weight:700;cursor:pointer;font-family:inherit;font-size:12px;letter-spacing:.5px">SCAN ▶</button>
-      <label style="font-size:11px;color:#a0aec0;cursor:pointer"><input type="checkbox" id="tf-setuponly" onchange="renderTradeFinder(_tfData)" style="vertical-align:middle"> only full 3/3 setups</label>
+      <label style="font-size:11px;color:var(--green);cursor:pointer"><input type="checkbox" id="tf-crosstoday" checked onchange="renderTradeFinder(_tfData)" style="vertical-align:middle"> ⚡ only crossing 200 EMA today</label>
       <span id="tf-status" style="font-size:11px;color:var(--dim)"></span>
     </div>
     <div id="tf-results"></div>
@@ -1016,36 +1017,37 @@ async function runTradeFinder(){
 
 function renderTradeFinder(d){
   if(!d) return; _tfData = d;
-  const only = document.getElementById('tf-setuponly')?.checked;
+  const crossOnly = document.getElementById('tf-crosstoday')?.checked;
   let rows = d.rows;
-  if(only) rows = rows.filter(r=>r.setup==='LONG'||r.setup==='SHORT');
+  if(crossOnly) rows = rows.filter(r=>r.cross_today);
   const nLong = d.rows.filter(r=>r.setup==='LONG').length;
   const nShort = d.rows.filter(r=>r.setup==='SHORT').length;
+  const nCross = d.rows.filter(r=>r.cross_today).length;
   const badge = s => {
-    if(s==='LONG')  return '<span style="background:rgba(0,255,157,.15);color:var(--green);border:1px solid rgba(0,255,157,.4);padding:1px 7px;border-radius:3px;font-weight:700;font-size:10px">▲ LONG 3/3</span>';
-    if(s==='SHORT') return '<span style="background:rgba(255,68,102,.15);color:var(--red);border:1px solid rgba(255,68,102,.4);padding:1px 7px;border-radius:3px;font-weight:700;font-size:10px">▼ SHORT 3/3</span>';
-    if(s==='WATCH-L') return '<span style="color:var(--green);font-size:10px">watch ↑ 2/3</span>';
-    if(s==='WATCH-S') return '<span style="color:var(--red);font-size:10px">watch ↓ 2/3</span>';
+    if(s==='LONG')  return '<span style="background:rgba(0,255,157,.15);color:var(--green);border:1px solid rgba(0,255,157,.4);padding:1px 7px;border-radius:3px;font-weight:700;font-size:10px">▲ LONG NOW</span>';
+    if(s==='SHORT') return '<span style="background:rgba(255,68,102,.15);color:var(--red);border:1px solid rgba(255,68,102,.4);padding:1px 7px;border-radius:3px;font-weight:700;font-size:10px">▼ SHORT NOW</span>';
+    if(s==='CROSS-UP') return '<span style="color:var(--green);font-size:10px">↑ crossed (sector/move mixed)</span>';
+    if(s==='CROSS-DN') return '<span style="color:var(--red);font-size:10px">↓ crossed (sector/move mixed)</span>';
     return '<span style="color:var(--dim);font-size:10px">—</span>';
   };
-  const emaCol = r => r.ema_state==='Above'?'var(--green)':r.ema_state==='Below'?'var(--red)':'var(--amber)';
+  const emaCol = r => r.cross_dir==='up'?'var(--green)':r.cross_dir==='dn'?'var(--red)':r.ema_state==='Above'?'#7ee787':r.ema_state==='Below'?'#ff9aaa':'var(--amber)';
   const body = rows.map(r=>{
-    const full = r.setup==='LONG'||r.setup==='SHORT';
-    const tint = r.setup==='LONG'?'background:rgba(0,255,157,.06)':r.setup==='SHORT'?'background:rgba(255,68,102,.06)':'';
+    const now = r.setup==='LONG'||r.setup==='SHORT';
+    const tint = r.setup==='LONG'?'background:rgba(0,255,157,.08)':r.setup==='SHORT'?'background:rgba(255,68,102,.08)':r.cross_today?'background:rgba(255,179,71,.05)':'';
     return `<tr style="cursor:pointer;${tint}" onclick="document.querySelector('.tab[onclick*=backtest]').click();document.getElementById('bt-symbol').value='${r.symbol}';runBacktest();">
-      <td style="font-weight:700;color:#e2e8f0">${full?'★ ':''}${r.symbol}</td>
+      <td style="font-weight:700;color:#e2e8f0">${now?'★ ':''}${r.symbol}</td>
       <td style="color:${r.chg>=0?'var(--green)':'var(--red)'};text-align:right;font-weight:700">${r.chg>=0?'+':''}${r.chg}%</td>
       <td style="color:#a0aec0">${r.sector}</td>
       <td style="text-align:right;color:${r.sector_chg==null?'var(--dim)':r.sector_chg>=0?'var(--green)':'var(--red)'}">${r.sector_chg==null?'—':(r.sector_chg>=0?'+':'')+r.sector_chg+'%'}</td>
-      <td style="text-align:center;color:${emaCol(r)};font-weight:700">${r.ema_state}${r.ema_dist!=null?' <span style="color:var(--dim);font-weight:400">('+(r.ema_dist>=0?'+':'')+r.ema_dist+'%)</span>':''}</td>
+      <td style="text-align:center;color:${emaCol(r)};font-weight:${r.cross_today?'700':'400'}">${r.ema_state}${r.ema_dist!=null?' <span style="color:var(--dim);font-weight:400">('+(r.ema_dist>=0?'+':'')+r.ema_dist+'%)</span>':''}</td>
       <td style="text-align:center">${badge(r.setup)}</td></tr>`;
-  }).join('') || `<tr><td colspan="6" style="text-align:center;color:var(--dim);padding:14px">No movers match.</td></tr>`;
+  }).join('') || `<tr><td colspan="6" style="text-align:center;color:var(--dim);padding:14px">No stocks crossing the 200 EMA today among the movers.</td></tr>`;
   document.getElementById('tf-results').innerHTML =
     `<div style="font-size:11px;color:#a0aec0;margin-bottom:8px">
-       <b style="color:var(--green)">${nLong} LONG</b> &nbsp; <b style="color:var(--red)">${nShort} SHORT</b> full 3/3 setups · ${d.rows.length} movers scanned · click a row to backtest it</div>
+       <b style="color:var(--gold)">${nCross} crossing 200 EMA today</b> · of which <b style="color:var(--green)">${nLong} LONG</b> / <b style="color:var(--red)">${nShort} SHORT</b> (cross + move + sector aligned) · ${d.rows.length} movers scanned${d.data_date?' · data '+d.data_date:''} · click a row to backtest it</div>
      <div style="max-height:560px;overflow:auto;border:1px solid var(--border);border-radius:6px">
        <table class="matrix" style="width:100%">
-         <thead><tr><th>Stock</th><th style="text-align:right">Day %</th><th>Sector</th><th style="text-align:right">Sector %</th><th style="text-align:center">200 EMA</th><th style="text-align:center">Confluence</th></tr></thead>
+         <thead><tr><th>Stock</th><th style="text-align:right">Day %</th><th>Sector</th><th style="text-align:right">Sector %</th><th style="text-align:center">200 EMA</th><th style="text-align:center">Signal</th></tr></thead>
          <tbody>${body}</tbody></table></div>`;
 }
 

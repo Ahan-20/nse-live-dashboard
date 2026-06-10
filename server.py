@@ -256,20 +256,34 @@ _ema_cache = {}
 
 
 def ema200_last(symbol):
-    """(200-EMA, last close) from the historical DB. Cached (daily-static)."""
+    """(200-EMA, last close, prev close, last date) from the historical DB.
+    Cached (daily-static)."""
     if symbol in _ema_cache:
         return _ema_cache[symbol]
     try:
         bars = bt.load(symbol)
         if len(bars) >= 200:
             closes = [b["c"] for b in bars]
-            res = (bt.ema(closes, 200)[-1], closes[-1])
+            res = (bt.ema(closes, 200)[-1], closes[-1],
+                   closes[-2] if len(closes) >= 2 else closes[-1], bars[-1]["dt"])
         else:
-            res = (None, None)
+            res = (None, None, None, None)
     except Exception:
-        res = (None, None)
+        res = (None, None, None, None)
     _ema_cache[symbol] = res
     return res
+
+
+_MON3 = {m: i for i, m in enumerate(
+    ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], 1)}
+
+
+def _nse_date_iso(ts):
+    try:
+        d, mon, y = ts.split(" ")[0].split("-")
+        return "%04d-%02d-%02d" % (int(y), _MON3[mon], int(d))
+    except Exception:
+        return None
 
 
 def _movers(kind, bucket):
@@ -286,6 +300,8 @@ def build_tradefinder(universe):
     def sdir(disp):
         return by_name.get(disp.upper())
 
+    live_date = _nse_date_iso(all_idx.get("timestamp", "") or "")
+
     stocks = {}
     for s in _movers("gainers", bucket):
         stocks[s.get("symbol")] = s
@@ -301,33 +317,48 @@ def build_tradefinder(universe):
         secs = SECTOR_MAP.get(sym, [])
         secdirs = [(d, sdir(d)) for d in secs if sdir(d) is not None]
         rep = max(secdirs, key=lambda x: abs(x[1])) if secdirs else None
-        ema, _ = ema200_last(sym)
-        if ema and ltp:
-            dist = (ltp - ema) / ema * 100
-            ema_state = "Near" if abs(dist) < 1 else ("Above" if dist > 0 else "Below")
-        else:
-            dist, ema_state = None, "?"
         sec_up = rep[1] > 0 if rep else None
-        long_setup = ch > 0 and sec_up is True and ema_state == "Above"
-        short_setup = ch < 0 and sec_up is False and ema_state == "Below"
-        # confluence score: stock dir, sector dir, EMA all agree (out of 3)
-        if ch >= 0:
-            score = (1) + (1 if sec_up else 0) + (1 if ema_state == "Above" else 0)
-            setup = "LONG" if long_setup else ("WATCH-L" if score >= 2 else "")
+
+        # Yesterday's close (prev_price) and today's price (ltp) BOTH come from the
+        # live NSE feed — consecutive days — so the cross check is precise for TODAY,
+        # independent of the DB snapshot date. DB supplies only the slow 200 EMA value.
+        ema = ema200_last(sym)[0]
+        prevp = float(s.get("prev_price", 0) or 0)
+        cross_dir = None       # 'up' | 'dn' | None  — did it cross the 200 EMA TODAY?
+        ema_state, dist = "?", None
+        if ema and ltp and prevp:
+            up_cross = prevp <= ema < ltp
+            dn_cross = prevp >= ema > ltp
+            cross_dir = "up" if up_cross else ("dn" if dn_cross else None)
+            dist = (ltp - ema) / ema * 100
+            if up_cross:
+                ema_state = "Cross ↑ today"
+            elif dn_cross:
+                ema_state = "Cross ↓ today"
+            else:
+                ema_state = "Near" if abs(dist) < 1 else ("Above" if dist > 0 else "Below")
+
+        # The trade signal Abhishek wants: a FRESH cross today, aligned with the
+        # stock's move and its sector.
+        if cross_dir == "up":
+            setup = "LONG" if (ch > 0 and sec_up is True) else "CROSS-UP"
+        elif cross_dir == "dn":
+            setup = "SHORT" if (ch < 0 and sec_up is False) else "CROSS-DN"
         else:
-            score = (1) + (1 if sec_up is False else 0) + (1 if ema_state == "Below" else 0)
-            setup = "SHORT" if short_setup else ("WATCH-S" if score >= 2 else "")
+            setup = ""
         rows.append({
             "symbol": sym, "chg": round(ch, 2), "ltp": round(ltp, 2),
             "side": "gainer" if ch >= 0 else "loser",
             "sector": rep[0] if rep else "—",
             "sector_chg": round(rep[1], 2) if rep else None,
             "ema_state": ema_state, "ema_dist": round(dist, 2) if dist is not None else None,
-            "setup": setup, "score": score,
+            "cross_today": cross_dir is not None, "cross_dir": cross_dir,
+            "setup": setup,
         })
-    rows.sort(key=lambda r: (r["score"], abs(r["chg"])), reverse=True)
+    rank = {"LONG": 4, "SHORT": 4, "CROSS-UP": 3, "CROSS-DN": 3, "": 0}
+    rows.sort(key=lambda r: (rank.get(r["setup"], 0), abs(r["chg"])), reverse=True)
     return {"ok": True, "universe": universe, "asOf": (all_idx.get("timestamp", "") or "")[-8:],
-            "rows": rows}
+            "data_date": live_date, "rows": rows}
 
 
 _tf_cache = {"t": 0.0, "data": {}}
