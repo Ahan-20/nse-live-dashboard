@@ -170,6 +170,7 @@
   <div class="header-meta">
     <div class="meta-chip">NIFTY 50 <span id="nifty-val">24,215</span> <span id="nifty-chg" style="color:var(--green)">+0.68%</span></div>
     <div class="meta-chip">BANK NIFTY <span id="sensex-val">52,418</span> <span id="sensex-chg" style="color:var(--green)">+0.61%</span></div>
+    <div class="meta-chip">SENSEX <span id="snsx-val">—</span> <span id="snsx-chg" style="color:var(--dim)">—</span></div>
     <div class="tf-switch">
       <button class="tf-btn active" onclick="setTf('5m',this)">5m</button>
       <button class="tf-btn" onclick="setTf('15m',this)">15m</button>
@@ -1346,6 +1347,7 @@ async function refreshLive(){
     renderTicker(); renderSectors(); renderStocks(); renderAlerts();
     if(d.nifty) setHeaderChip('nifty',  d.nifty);
     if(d.bank)  setHeaderChip('sensex', d.bank);   // chip relabelled BANK NIFTY
+    if(d.sensex) setHeaderChip('snsx',  d.sensex); // real SENSEX from BSE
     setLiveStatus(d.status, d.asOf);
   }catch(e){
     setLiveStatus('error', e.message);

@@ -101,6 +101,24 @@ def nse_get(path):
         return json.loads(_opener.open(req, timeout=12).read().decode("utf-8"))
 
 
+# ── BSE (SENSEX is a BSE index, not on NSE) ──────────────────────────
+_bse_opener = urllib.request.build_opener()
+BSE_HEADERS = {"User-Agent": HEADERS["User-Agent"], "Accept": "application/json",
+               "Referer": "https://www.bseindia.com/", "Origin": "https://www.bseindia.com"}
+
+
+def fetch_sensex():
+    """Live BSE SENSEX (scripcode 1) -> {val, chg, up}."""
+    url = ("https://api.bseindia.com/BseIndiaAPI/api/getScripHeaderData/w"
+           "?Debtflag=&scripcode=1&seriesid=")
+    req = urllib.request.Request(url, headers=BSE_HEADERS)
+    d = json.loads(_bse_opener.open(req, timeout=12).read().decode("utf-8"))
+    cr = d.get("CurrRate", {})
+    ltp = float(str(cr.get("LTP", "0")).replace(",", ""))
+    pchg = float(str(cr.get("PcChg", "0")).replace(",", "") or 0)
+    return {"val": f"{ltp:,.2f}", "chg": f"{pchg:+.2f}%", "up": pchg >= 0}
+
+
 # ── formatting helpers ───────────────────────────────────────────────
 def fnum(x):
     try:
@@ -179,6 +197,15 @@ def build_dashboard():
     if b:
         c = float(b.get("percentChange", 0))
         out["bank"] = {"val": fnum(b.get("last")), "chg": fpct(c), "up": c >= 0}
+
+    # SENSEX (BSE) — broad-market gauge. Failure here must not break the NSE feed.
+    try:
+        sx = fetch_sensex()
+        out["sensex"] = sx
+        out["ticker"].insert(0, {"name": "SENSEX", "val": sx["val"],
+                                 "chg": sx["chg"], "up": sx["up"]})
+    except Exception:
+        out["sensex"] = None
 
     # Gainers / losers via the (ungated) live-analysis-variations endpoint.
     # It buckets movers by index; we use the NIFTY (50) bucket.
