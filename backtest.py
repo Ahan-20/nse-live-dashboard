@@ -187,7 +187,7 @@ def weekly_htf_bull_bear(bars):
 def run_backtest(symbol, capital=100000.0, risk_pct=0.01, rr=2.0, sl_atr=1.5,
                  vol_conf=2.0, vol_early=1.4, require_retest=False,
                  pivot_lb=8, max_hold=60, mode="ema200cross",
-                 exit_mode="cross", direction="both"):
+                 exit_mode="cross", direction="both", lookback_days=None):
     bars = load(symbol)
     if not bars:
         return {"ok": False, "error": f"'{symbol.upper()}' isn't in the dataset. "
@@ -320,13 +320,16 @@ def run_backtest(symbol, capital=100000.0, risk_pct=0.01, rr=2.0, sl_atr=1.5,
     use_sltp = exit_mode in ("sltp", "either")
     use_cross = exit_mode in ("cross", "either")
 
-    # Report/trade only the last 5 years; earlier bars are EMA-200 warm-up so the
-    # signal is valid from day 1 of the window (matching a TradingView chart).
+    # Report/trade only the chosen window (default 5 years); earlier bars are
+    # EMA-200 warm-up so the signal is valid from day 1 of the window.
     last = datetime.date.fromisoformat(bars[-1]["dt"])
-    try:
-        cutoff = last.replace(year=last.year - 5).isoformat()
-    except ValueError:
-        cutoff = last.replace(year=last.year - 5, day=28).isoformat()
+    if lookback_days:
+        cutoff = (last - datetime.timedelta(days=lookback_days)).isoformat()
+    else:
+        try:
+            cutoff = last.replace(year=last.year - 5).isoformat()
+        except ValueError:
+            cutoff = last.replace(year=last.year - 5, day=28).isoformat()
     w = next((idx for idx, b in enumerate(bars) if b["dt"] >= cutoff), 0)
     start = max(200, w)
 
@@ -443,7 +446,7 @@ def _report(symbol, bars, trades, capital, equity, maxdd, eq_curve, start=0, cha
         "avg_loss": round(-gl / len(losses), 2) if losses else 0,
         "avg_r": round(sum(t["r"] for t in trades) / nt, 2) if nt else 0,
         "expectancy": round(sum(t["pnl"] for t in trades) / nt, 2) if nt else 0,
-        "profit_factor": round(gp / gl, 2) if gl else (float("inf") if gp else 0),
+        "profit_factor": round(gp / gl, 2) if gl else (None if gp else 0),
         "max_drawdown_pct": pct(maxdd),
         "best_trade": round(max((t["pnl"] for t in trades), default=0), 2),
         "worst_trade": round(min((t["pnl"] for t in trades), default=0), 2),

@@ -537,6 +537,14 @@
       <span id="bt-status" style="font-size:11px;color:var(--dim)"></span>
     </div>
     <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px;padding:10px 12px;background:#0a1420;border:1px solid var(--border);border-radius:6px">
+      <label class="bt-field">Period<select id="bt-period">
+        <option value="5y">5 Years</option>
+        <option value="90d">90 Days</option>
+        <option value="60d">60 Days</option>
+        <option value="30d">30 Days</option>
+        <option value="15d">15 Days</option>
+        <option value="7d">7 Days</option>
+        <option value="3d">3 Days</option></select></label>
       <label class="bt-field">Strategy<select id="bt-strategy">
         <option value="cross">200 EMA Cross</option>
         <option value="pullback">20 EMA Pullback</option></select></label>
@@ -1057,7 +1065,7 @@ function btChip(s){ document.getElementById('bt-symbol').value = s; runBacktest(
 function btParams(){
   const g = id => document.getElementById(id);
   return new URLSearchParams({
-    strategy:g('bt-strategy').value, exit:g('bt-exit').value, direction:g('bt-direction').value,
+    period:g('bt-period').value, strategy:g('bt-strategy').value, exit:g('bt-exit').value, direction:g('bt-direction').value,
     capital:g('bt-capital').value||100000, risk:g('bt-risk').value||1,
     sl:g('bt-sl').value||1.5, rr:g('bt-rr').value||2 });
 }
@@ -1091,7 +1099,7 @@ function renderLeaderboard(d){
   const cf = d.config||{};
   const beat = d.rows.filter(r=>r.vs_buyhold!=null && r.vs_buyhold>0).length;
   const profit = d.rows.filter(r=>r.return_pct!=null && r.return_pct>0).length;
-  const cfgLine = cf.strategy ? `${cf.strategy} · exit: ${cf.exit} · ${cf.direction} · ${cf.risk_pct}% risk · SL ${cf.sl_atr}×ATR · ${cf.rr}R` : '';
+  const cfgLine = cf.strategy ? `${cf.period||'5Y'} · ${cf.strategy} · exit: ${cf.exit} · ${cf.direction} · ${cf.risk_pct}% risk · SL ${cf.sl_atr}×ATR · ${cf.rr}R` : '';
 
   // filter
   let shown = d.rows.filter(r=>!r.skip);
@@ -1119,7 +1127,7 @@ function renderLeaderboard(d){
       <td style="text-align:right;color:${pos(r.vs_buyhold)};font-weight:700">${r.vs_buyhold>=0?'+':''}${r.vs_buyhold}%</td>
       <td style="text-align:right;font-weight:700;color:${hiWin?'var(--green)':'#a0aec0'}">${r.win_rate}%</td>
       <td style="text-align:right">${r.trades}</td>
-      <td style="text-align:right;color:${r.profit_factor>=1?'var(--green)':'var(--red)'}">${r.profit_factor}</td>
+      <td style="text-align:right;color:${(r.profit_factor==null||r.profit_factor>=1)?'var(--green)':'var(--red)'}">${r.profit_factor==null?'∞':r.profit_factor}</td>
       <td style="text-align:right;color:var(--red)">${r.max_drawdown_pct}%</td></tr>`;
   }).join('') || `<tr><td colspan="9" style="color:var(--dim);text-align:center;padding:14px">No stocks match the filter.</td></tr>`;
   document.getElementById('bt-results').innerHTML =
@@ -1179,6 +1187,7 @@ async function runBacktest(){
   const g = id => document.getElementById(id);
   const qs = new URLSearchParams({
     symbol: sym,
+    period: g('bt-period').value,
     strategy: g('bt-strategy').value,
     exit: g('bt-exit').value,
     direction: g('bt-direction').value,
@@ -1211,7 +1220,7 @@ function renderBacktest(d){
     card('Win rate', d.win_rate+'%', d.win_rate>=50?'var(--green)':'var(--amber)'),
     card('Wins / Losses', d.wins+' / '+d.losses),
     card('Long / Short', d.longs+' / '+d.shorts),
-    card('Profit factor', d.profit_factor, d.profit_factor>=1?'var(--green)':'var(--red)'),
+    card('Profit factor', d.profit_factor==null?'∞':d.profit_factor, (d.profit_factor==null||d.profit_factor>=1)?'var(--green)':'var(--red)'),
     card('Avg R / trade', d.avg_r, pos(d.avg_r)),
     card('Expectancy', inr(d.expectancy), pos(d.expectancy)),
     card('Avg win / loss', inr(d.avg_win)+' / '+inr(d.avg_loss)),
@@ -1281,7 +1290,7 @@ function renderBacktest(d){
 
   const cf = d.config || {};
   const cfgLine = cf.strategy ? `<div style="font-size:10px;color:var(--dim);margin-bottom:10px">
-      ${cf.strategy} · exit: ${cf.exit} · ${cf.direction} · ₹${Number(cf.capital).toLocaleString('en-IN')} start · ${cf.risk_pct}% risk/trade · SL ${cf.sl_atr}×ATR · ${cf.rr}R target</div>` : '';
+      <b style="color:var(--gold)">${cf.period||'5Y'}</b> · ${cf.strategy} · exit: ${cf.exit} · ${cf.direction} · ₹${Number(cf.capital).toLocaleString('en-IN')} start · ${cf.risk_pct}% risk/trade · SL ${cf.sl_atr}×ATR · ${cf.rr}R target</div>` : '';
   document.getElementById('bt-results').innerHTML =
     `<div style="font-size:13px;font-weight:700;color:#e2e8f0;margin-bottom:4px">${d.symbol}
        <span style="font-size:10px;color:var(--dim);font-weight:400">· ${d.period.from} → ${d.period.to} · ${d.period.bars} daily bars</span></div>

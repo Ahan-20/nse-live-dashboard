@@ -362,7 +362,11 @@ def cached_backtest(symbol, q):
     direction = q.get("direction", ["both"])[0]
     if direction not in ("both", "long", "short"):
         direction = "both"
+    period = q.get("period", ["5y"])[0]
+    lookback = {"3d": 3, "7d": 7, "15d": 15, "30d": 30, "60d": 60,
+                "90d": 90, "5y": None}.get(period, None)
     params = dict(mode=mode, exit_mode=exit_mode, direction=direction,
+                  lookback_days=lookback,
                   capital=_num(q, "capital", 100000, 1000, 1e9),
                   risk_pct=_num(q, "risk", 1.0, 0.1, 100) / 100.0,
                   sl_atr=_num(q, "sl", 1.5, 0.1, 20),
@@ -377,7 +381,8 @@ def cached_backtest(symbol, q):
                          "either": "Stop/target or cross"}[exit_mode],
                 "direction": direction, "capital": params["capital"],
                 "risk_pct": round(params["risk_pct"] * 100, 2),
-                "sl_atr": params["sl_atr"], "rr": params["rr"]}
+                "sl_atr": params["sl_atr"], "rr": params["rr"],
+                "period": period.upper()}
         _bt_cache[key] = rep
     return _bt_cache[key]
 
