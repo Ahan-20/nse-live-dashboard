@@ -19,6 +19,7 @@ Outside hours NSE returns the last close, so the page still fills in.
 import os
 import json
 import time
+import datetime
 import threading
 import urllib.request
 import urllib.error
@@ -282,23 +283,49 @@ except Exception:
 _ema_cache = {}
 
 
-def ema200_last(symbol):
-    """(200-EMA, last close, prev close, last date) from the historical DB.
-    Cached (daily-static)."""
+def tf_emas(symbol):
+    """200-EMA on multiple timeframes from the daily DB, plus the last close on
+    each timeframe (for cross detection). Cached (daily-static).
+    Returns {daily, weekly, daily_close, weekly_close} or None."""
     if symbol in _ema_cache:
         return _ema_cache[symbol]
+    res = None
     try:
         bars = bt.load(symbol)
         if len(bars) >= 200:
             closes = [b["c"] for b in bars]
-            res = (bt.ema(closes, 200)[-1], closes[-1],
-                   closes[-2] if len(closes) >= 2 else closes[-1], bars[-1]["dt"])
-        else:
-            res = (None, None, None, None)
+            # weekly: last close of each ISO week
+            wk, order = {}, []
+            for b in bars:
+                y, w, _ = datetime.date.fromisoformat(b["dt"]).isocalendar()
+                k = (y, w)
+                if k not in wk:
+                    order.append(k)
+                wk[k] = b["c"]
+            wcloses = [wk[k] for k in order]
+            res = {
+                "daily": bt.ema(closes, 200)[-1],
+                "daily_close": closes[-1],
+                "weekly": bt.ema(wcloses, 200)[-1] if len(wcloses) >= 200 else None,
+                "weekly_close": wcloses[-1] if wcloses else None,
+            }
     except Exception:
-        res = (None, None, None, None)
+        res = None
     _ema_cache[symbol] = res
     return res
+
+
+def cross_state(prev, now, ema):
+    """How `now` sits vs the 200 EMA, and whether it just crossed from `prev`.
+    Returns (label, dir, dist%) — dir is 'up'|'dn'|None."""
+    if not ema or not prev or not now:
+        return ("—", None, None)
+    dist = (now - ema) / ema * 100
+    if prev <= ema < now:
+        return ("Cross ↑", "up", dist)
+    if prev >= ema > now:
+        return ("Cross ↓", "dn", dist)
+    return ("Near" if abs(dist) < 1 else ("Above" if dist > 0 else "Below"), None, dist)
 
 
 _MON3 = {m: i for i, m in enumerate(
@@ -346,30 +373,22 @@ def build_tradefinder(universe):
         rep = max(secdirs, key=lambda x: abs(x[1])) if secdirs else None
         sec_up = rep[1] > 0 if rep else None
 
-        # Yesterday's close (prev_price) and today's price (ltp) BOTH come from the
-        # live NSE feed — consecutive days — so the cross check is precise for TODAY,
-        # independent of the DB snapshot date. DB supplies only the slow 200 EMA value.
-        ema = ema200_last(sym)[0]
+        # Live yesterday-close (prev_price) and today's price (ltp) drive the DAILY
+        # cross (precise for TODAY). Weekly cross uses the last weekly close vs ltp
+        # (this week). DB supplies only the slow 200-EMA values per timeframe.
+        tf = tf_emas(sym)
         prevp = float(s.get("prev_price", 0) or 0)
-        cross_dir = None       # 'up' | 'dn' | None  — did it cross the 200 EMA TODAY?
-        ema_state, dist = "?", None
-        if ema and ltp and prevp:
-            up_cross = prevp <= ema < ltp
-            dn_cross = prevp >= ema > ltp
-            cross_dir = "up" if up_cross else ("dn" if dn_cross else None)
-            dist = (ltp - ema) / ema * 100
-            if up_cross:
-                ema_state = "Cross ↑ today"
-            elif dn_cross:
-                ema_state = "Cross ↓ today"
-            else:
-                ema_state = "Near" if abs(dist) < 1 else ("Above" if dist > 0 else "Below")
+        d_lbl, d_dir, d_dist = ("—", None, None)
+        w_lbl, w_dir, w_dist = ("—", None, None)
+        if tf and ltp:
+            d_lbl, d_dir, d_dist = cross_state(prevp, ltp, tf["daily"])
+            w_lbl, w_dir, w_dist = cross_state(tf["weekly_close"], ltp, tf["weekly"])
 
-        # The trade signal Abhishek wants: a FRESH cross today, aligned with the
-        # stock's move and its sector.
-        if cross_dir == "up":
+        cross_dir = d_dir            # "today" cross == the DAILY 200 EMA cross
+        # Strong signal: fresh DAILY cross + stock move + sector all aligned.
+        if d_dir == "up":
             setup = "LONG" if (ch > 0 and sec_up is True) else "CROSS-UP"
-        elif cross_dir == "dn":
+        elif d_dir == "dn":
             setup = "SHORT" if (ch < 0 and sec_up is False) else "CROSS-DN"
         else:
             setup = ""
@@ -378,12 +397,15 @@ def build_tradefinder(universe):
             "side": "gainer" if ch >= 0 else "loser",
             "sector": rep[0] if rep else "—",
             "sector_chg": round(rep[1], 2) if rep else None,
-            "ema_state": ema_state, "ema_dist": round(dist, 2) if dist is not None else None,
-            "cross_today": cross_dir is not None, "cross_dir": cross_dir,
+            "daily": {"label": d_lbl, "dir": d_dir, "dist": round(d_dist, 2) if d_dist is not None else None},
+            "weekly": {"label": w_lbl, "dir": w_dir, "dist": round(w_dist, 2) if w_dist is not None else None},
+            "cross_today": d_dir is not None, "cross_dir": cross_dir,
+            "cross_any": (d_dir is not None) or (w_dir is not None),
             "setup": setup,
         })
     rank = {"LONG": 4, "SHORT": 4, "CROSS-UP": 3, "CROSS-DN": 3, "": 0}
-    rows.sort(key=lambda r: (rank.get(r["setup"], 0), abs(r["chg"])), reverse=True)
+    rows.sort(key=lambda r: (rank.get(r["setup"], 0), r["weekly"]["dir"] is not None,
+                             abs(r["chg"])), reverse=True)
     return {"ok": True, "universe": universe, "asOf": (all_idx.get("timestamp", "") or "")[-8:],
             "data_date": live_date, "rows": rows}
 
