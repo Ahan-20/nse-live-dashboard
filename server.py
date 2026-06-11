@@ -103,21 +103,42 @@ def nse_get(path):
 
 
 # ── BSE (SENSEX is a BSE index, not on NSE) ──────────────────────────
-_bse_opener = urllib.request.build_opener()
+_bse_jar = http.cookiejar.CookieJar()
+_bse_opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(_bse_jar))
 BSE_HEADERS = {"User-Agent": HEADERS["User-Agent"], "Accept": "application/json",
                "Referer": "https://www.bseindia.com/", "Origin": "https://www.bseindia.com"}
+_sensex_last = None     # keep last good value (BSE flaky from datacenter IPs)
+
+
+def _bse_warm():
+    for u in ("https://www.bseindia.com/", "https://www.bseindia.com/sensex/code/16/"):
+        try:
+            _bse_opener.open(urllib.request.Request(
+                u, headers={"User-Agent": HEADERS["User-Agent"]}), timeout=10).read()
+        except Exception:
+            pass
 
 
 def fetch_sensex():
-    """Live BSE SENSEX (scripcode 1) -> {val, chg, up}."""
+    """Live BSE SENSEX (scripcode 1) -> {val, chg, up}. Falls back to the last
+    good value on transient datacenter blocks rather than going blank."""
+    global _sensex_last
     url = ("https://api.bseindia.com/BseIndiaAPI/api/getScripHeaderData/w"
            "?Debtflag=&scripcode=1&seriesid=")
-    req = urllib.request.Request(url, headers=BSE_HEADERS)
-    d = json.loads(_bse_opener.open(req, timeout=12).read().decode("utf-8"))
-    cr = d.get("CurrRate", {})
-    ltp = float(str(cr.get("LTP", "0")).replace(",", ""))
-    pchg = float(str(cr.get("PcChg", "0")).replace(",", "") or 0)
-    return {"val": f"{ltp:,.2f}", "chg": f"{pchg:+.2f}%", "up": pchg >= 0}
+    for attempt in range(2):
+        try:
+            req = urllib.request.Request(url, headers=BSE_HEADERS)
+            d = json.loads(_bse_opener.open(req, timeout=12).read().decode("utf-8"))
+            cr = d.get("CurrRate", {})
+            ltp = float(str(cr.get("LTP", "0")).replace(",", ""))
+            pchg = float(str(cr.get("PcChg", "0")).replace(",", "") or 0)
+            if ltp > 0:
+                _sensex_last = {"val": f"{ltp:,.2f}", "chg": f"{pchg:+.2f}%",
+                                "up": pchg >= 0}
+                return _sensex_last
+        except Exception:
+            _bse_warm()
+    return _sensex_last     # last good (or None on cold start)
 
 
 # ── formatting helpers ───────────────────────────────────────────────

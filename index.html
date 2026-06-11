@@ -996,11 +996,17 @@ function showTab(name, el){
     const el2 = document.getElementById('tab-'+id);
     if(el2) el2.style.display = id===name ? 'block' : 'none';
   });
-  if(name==='finder' && !_tfData) runTradeFinder();
+  if(name==='finder'){
+    if(!_tfData) runTradeFinder();
+    if(!_tfTimer) _tfTimer = setInterval(()=>{      // auto-refresh while tab is open
+      const t = document.getElementById('tab-finder');
+      if(t && t.style.display!=='none') runTradeFinder();
+    }, 45000);
+  }
 }
 
 // ─── TRADE FINDER ─────────────────────────────────────────────────
-let _tfData = null;
+let _tfData = null, _tfTimer = null;
 async function runTradeFinder(){
   const status = document.getElementById('tf-status');
   const out = document.getElementById('tf-results');
@@ -1052,7 +1058,7 @@ function renderTradeFinder(d){
   }).join('') || `<tr><td colspan="7" style="text-align:center;color:var(--dim);padding:14px">No stocks crossing a 200 EMA among the movers.</td></tr>`;
   document.getElementById('tf-results').innerHTML =
     `<div style="font-size:11px;color:#a0aec0;margin-bottom:8px">
-       <b style="color:var(--gold)">${nDaily} crossing daily</b> · <b style="color:var(--cyan)">${nWeekly} crossing weekly</b> · of which <b style="color:var(--green)">${nLong} LONG</b> / <b style="color:var(--red)">${nShort} SHORT</b> (daily cross + move + sector aligned) · ${d.rows.length} movers${d.data_date?' · data '+d.data_date:''} · click a row to backtest</div>
+       <b style="color:var(--gold)">${nDaily} crossing daily</b> · <b style="color:var(--cyan)">${nWeekly} crossing weekly</b> · of which <b style="color:var(--green)">${nLong} LONG</b> / <b style="color:var(--red)">${nShort} SHORT</b> (daily cross + move + sector aligned) · ${d.rows.length} movers${d.data_date?' · NSE data '+d.data_date:''} · <span style="color:var(--green)">updated ${new Date().toLocaleTimeString('en-IN')}</span> · auto-refresh 45s · click a row to backtest</div>
      <div style="max-height:560px;overflow:auto;border:1px solid var(--border);border-radius:6px">
        <table class="matrix" style="width:100%">
          <thead><tr><th>Stock</th><th style="text-align:right">Day %</th><th>Sector</th><th style="text-align:right">Sector %</th><th style="text-align:center">Daily 200 EMA</th><th style="text-align:center">Weekly 200 EMA</th><th style="text-align:center">Signal</th></tr></thead>
