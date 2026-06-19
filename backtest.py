@@ -18,6 +18,11 @@ import math
 import sqlite3
 import datetime
 
+try:
+    from intraday import PROVIDER as _INTRA
+except Exception:                  # never break daily backtests on intraday import errors
+    _INTRA = None
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
 # Full DB (all ~3000 symbols) if present locally; else the shipped slim DB
 # (top-500 liquid names) that's baked into the deployed image.
@@ -481,3 +486,94 @@ if __name__ == "__main__":
     print("  by signal type:")
     for k, d in rep["by_type"].items():
         print(f"    {k:<16} n={d['n']:<4} win={d['win_rate']}%  pnl=Rs {d['pnl']:,}")
+
+
+# ── Multi-timeframe 200 EMA cross backtest (Abhishek's compare ask) ──
+def _backtest_bars(bars, capital=100000.0, risk_pct=0.01, rr=2.0, sl_atr=1.5):
+    """Generic 200 EMA cross + opposite-cross exit on any bar series.
+    Returns {ok, n_bars, trades, wins, losses, win_rate, return_pct,
+             profit_factor, avg_r}. Used for 15m/1h backtests on candles
+    fetched from the intraday provider."""
+    if len(bars) < 250:
+        return {"ok": False, "reason": f"only {len(bars)} bars (need 250+)"}
+    o = [b["o"] for b in bars]; h = [b["h"] for b in bars]
+    l = [b["l"] for b in bars]; c = [b["c"] for b in bars]
+    e = ema(c, 200); a = atr(h, l, c, 14)
+    sig = [None] * len(c)
+    for i in range(200, len(c)):
+        if c[i] > e[i] and c[i - 1] <= e[i - 1]: sig[i] = "long"
+        elif c[i] < e[i] and c[i - 1] >= e[i - 1]: sig[i] = "short"
+    equity = capital; trades = []
+    i = 200
+    while i < len(c) - 1:
+        d = sig[i]
+        if not d:
+            i += 1; continue
+        entry = o[i + 1]; risk = a[i] * sl_atr
+        if risk <= 0: i += 1; continue
+        qty = max(1, int((risk_pct * equity) / risk))
+        j = i + 1; exit_px = None; reason = None
+        while j < len(c):
+            if d == "long" and c[j] < e[j] and c[j - 1] >= e[j - 1]:
+                exit_px = c[j]; reason = "Cross"; break
+            if d == "short" and c[j] > e[j] and c[j - 1] <= e[j - 1]:
+                exit_px = c[j]; reason = "Cross"; break
+            j += 1
+        if exit_px is None:
+            j = len(c) - 1; exit_px = c[j]; reason = "End"
+        pnl = qty * (exit_px - entry) * (1 if d == "long" else -1)
+        equity += pnl
+        trades.append({"dir": d, "pnl": pnl,
+                       "r": pnl / (qty * risk) if qty * risk else 0})
+        i = j
+    wins = [t for t in trades if t["pnl"] > 0]
+    losses = [t for t in trades if t["pnl"] <= 0]
+    gp = sum(t["pnl"] for t in wins); gl = -sum(t["pnl"] for t in losses)
+    n = len(trades)
+    return {
+        "ok": True, "n_bars": len(c), "trades": n,
+        "wins": len(wins), "losses": len(losses),
+        "win_rate": round(len(wins) / n * 100, 1) if n else 0,
+        "return_pct": round((equity - capital) / capital * 100, 1),
+        "profit_factor": round(gp / gl, 2) if gl else None,
+        "avg_r": round(sum(t["r"] for t in trades) / n, 2) if n else 0,
+    }
+
+
+def multi_timeframe_compare(symbol):
+    """Compare 200 EMA cross win rate on 15m / 1h / 1d / 1w for the same stock,
+    same rules. Intraday TFs are skipped (with a reason) until an intraday
+    provider is configured."""
+    out = {"symbol": symbol.upper(), "results": {}}
+
+    # --- 15m and 1h need an intraday data source ---
+    for tf, days in (("15m", 90), ("1h", 180)):
+        if not (_INTRA and _INTRA.enabled):
+            out["results"][tf] = {"ok": False,
+                                  "reason": "intraday data not connected — set up Groww API"}
+            continue
+        bars = _INTRA.get_candles(symbol, tf, days=days)
+        out["results"][tf] = _backtest_bars(bars) if bars else {
+            "ok": False, "reason": "no candles returned"}
+
+    # --- Daily and Weekly come from our existing DB ---
+    bars = load(symbol)
+    if len(bars) < 250:
+        out["results"]["1d"] = {"ok": False, "reason": "not enough daily history"}
+        out["results"]["1w"] = {"ok": False, "reason": "not enough daily history"}
+        return out
+    out["results"]["1d"] = _backtest_bars(bars)
+    # weekly: last bar per ISO week
+    wk, order = {}, []
+    for b in bars:
+        y, w, _ = datetime.date.fromisoformat(b["dt"]).isocalendar()
+        k = (y, w)
+        if k not in wk: order.append(k); wk[k] = dict(b)
+        else:
+            wk[k]["c"] = b["c"]
+            wk[k]["h"] = max(wk[k]["h"], b["h"])
+            wk[k]["l"] = min(wk[k]["l"], b["l"])
+    wbars = [wk[k] for k in order]
+    out["results"]["1w"] = _backtest_bars(wbars) if len(wbars) >= 250 else {
+        "ok": False, "reason": f"only {len(wbars)} weekly bars (need 250+ ≈ 5 yrs)"}
+    return out

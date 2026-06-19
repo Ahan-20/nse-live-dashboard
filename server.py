@@ -29,6 +29,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import backtest as bt
+try:
+    from intraday import PROVIDER as INTRADAY
+except Exception:
+    INTRADAY = None
 
 PORT = int(os.environ.get("PORT", 8787))   # Railway injects PORT
 HOST = "0.0.0.0" if os.environ.get("PORT") else "127.0.0.1"
@@ -413,6 +417,36 @@ def build_tradefinder(universe):
             setup = "SHORT" if (ch < 0 and sec_up is False) else "CROSS-DN"
         else:
             setup = ""
+        # Abhishek's 1H rule: stock crossed its 1H 200 EMA, then the next
+        # 1H candle breaks the prior 1H candle's high (mirror for short).
+        # Needs intraday data; gracefully reports "needs intraday" otherwise.
+        h1 = {"state": "needs intraday", "fired": None}
+        if INTRADAY and INTRADAY.enabled:
+            bars1h = INTRADAY.get_candles(sym, "1h", days=15)
+            if len(bars1h) >= 220:
+                c1 = [b["c"] for b in bars1h]
+                e1 = bt.ema(c1, 200)
+                # find most recent cross
+                cross_i = None; cdir = None
+                for i in range(len(c1) - 1, 200, -1):
+                    if c1[i] > e1[i] and c1[i - 1] <= e1[i - 1]:
+                        cross_i, cdir = i, "up"; break
+                    if c1[i] < e1[i] and c1[i - 1] >= e1[i - 1]:
+                        cross_i, cdir = i, "dn"; break
+                if cross_i is not None and cross_i + 1 < len(bars1h):
+                    prev_high = bars1h[cross_i]["h"]
+                    prev_low = bars1h[cross_i]["l"]
+                    nxt = bars1h[cross_i + 1]
+                    if cdir == "up" and nxt["h"] > prev_high:
+                        h1 = {"state": "LONG SIGNAL", "fired": nxt["dt"]}
+                    elif cdir == "dn" and nxt["l"] < prev_low:
+                        h1 = {"state": "SHORT SIGNAL", "fired": nxt["dt"]}
+                    else:
+                        h1 = {"state": "Crossed, waiting for break", "fired": None}
+                else:
+                    h1 = {"state": "No recent 1H cross", "fired": None}
+            else:
+                h1 = {"state": "intraday data insufficient", "fired": None}
         rows.append({
             "symbol": sym, "chg": round(ch, 2), "ltp": round(ltp, 2),
             "side": "gainer" if ch >= 0 else "loser",
@@ -420,6 +454,7 @@ def build_tradefinder(universe):
             "sector_chg": round(rep[1], 2) if rep else None,
             "daily": {"label": d_lbl, "dir": d_dir, "dist": round(d_dist, 2) if d_dist is not None else None},
             "weekly": {"label": w_lbl, "dir": w_dir, "dist": round(w_dist, 2) if w_dist is not None else None},
+            "h1_rule": h1,                # Abhishek's 1H breakout rule
             "cross_today": d_dir is not None, "cross_dir": cross_dir,
             "cross_any": (d_dir is not None) or (w_dir is not None),
             "setup": setup,
@@ -428,7 +463,9 @@ def build_tradefinder(universe):
     rows.sort(key=lambda r: (rank.get(r["setup"], 0), r["weekly"]["dir"] is not None,
                              abs(r["chg"])), reverse=True)
     return {"ok": True, "universe": universe, "asOf": (all_idx.get("timestamp", "") or "")[-8:],
-            "data_date": live_date, "rows": rows}
+            "data_date": live_date, "rows": rows,
+            "intraday_connected": bool(INTRADAY and INTRADAY.enabled),
+            "intraday_provider": INTRADAY.name if INTRADAY else "none"}
 
 
 _tf_cache = {"t": 0.0, "data": {}}
@@ -541,6 +578,20 @@ class Handler(BaseHTTPRequestHandler):
                 rep = cached_tradefinder(uni)
             except Exception as e:
                 rep = {"ok": False, "error": str(e), "rows": []}
+            return self._send(200, json.dumps(rep).encode("utf-8"), "application/json")
+        if self.path.startswith("/api/tfcompare"):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            sym = (q.get("symbol", [""])[0] or "").strip().upper()
+            if not sym:
+                return self._send(400, b'{"ok":false,"error":"missing symbol"}',
+                                  "application/json")
+            try:
+                rep = bt.multi_timeframe_compare(sym)
+                rep["ok"] = True
+                rep["intraday_connected"] = bool(INTRADAY and INTRADAY.enabled)
+                rep["intraday_provider"] = INTRADAY.name if INTRADAY else "none"
+            except Exception as e:
+                rep = {"ok": False, "error": str(e)}
             return self._send(200, json.dumps(rep).encode("utf-8"), "application/json")
         if self.path.startswith("/api/exitcompare"):
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)

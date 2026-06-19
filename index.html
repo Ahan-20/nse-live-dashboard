@@ -535,6 +535,7 @@
       <button onclick="runBacktest()" style="background:var(--gold);color:#050a10;border:none;padding:8px 18px;border-radius:5px;font-weight:700;cursor:pointer;font-family:inherit;font-size:12px;letter-spacing:.5px">RUN ▶</button>
       <button onclick="runLeaderboard()" style="background:#1a2744;color:var(--cyan);border:1px solid var(--cyan);padding:8px 14px;border-radius:5px;font-weight:700;cursor:pointer;font-family:inherit;font-size:12px;letter-spacing:.5px">📊 ALL NIFTY 50</button>
       <button onclick="runExitCompare()" style="background:#1a2744;color:var(--purple);border:1px solid var(--purple);padding:8px 14px;border-radius:5px;font-weight:700;cursor:pointer;font-family:inherit;font-size:12px;letter-spacing:.5px">⚖️ BEST EXIT</button>
+      <button onclick="runTfCompare()" style="background:#1a2744;color:var(--blue);border:1px solid var(--blue);padding:8px 14px;border-radius:5px;font-weight:700;cursor:pointer;font-family:inherit;font-size:12px;letter-spacing:.5px">⏱ COMPARE TIMEFRAMES</button>
       <span id="bt-status" style="font-size:11px;color:var(--dim)"></span>
     </div>
     <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px;padding:10px 12px;background:#0a1420;border:1px solid var(--border);border-radius:6px">
@@ -573,8 +574,9 @@
       <div style="color:var(--dim);font-size:10px;margin-top:3px;max-width:820px;line-height:1.55">
         (1) sector heat → (2) NSE gainers/losers → (3) which 200 EMA each is crossing. <b>Daily</b> (200 days) = today's cross;
         <b>Weekly</b> (200 weeks) = this week's cross. A <b style="color:var(--green)">LONG/SHORT</b> badge = fresh <b>daily</b> cross + the stock's move + sector all agree.
-        <span style="color:#6b7689">Monthly / hourly / 15-min 200 EMA need data NSE doesn't provide free — not shown.</span>
+        <span style="color:#6b7689">15-min / hourly / monthly 200 EMA need a broker-provided intraday feed.</span>
       </div>
+      <div id="tf-intra-status" style="margin-top:6px;font-size:10px"></div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
       <select id="tf-universe" onchange="runTradeFinder()" style="background:#050a10;border:1px solid var(--green);color:var(--green);padding:8px 12px;border-radius:5px;font-family:inherit;font-size:13px;cursor:pointer">
@@ -1018,6 +1020,12 @@ async function runTradeFinder(){
     const d = await r.json();
     if(!d.ok){ status.textContent=d.error||'Failed'; status.style.color='var(--red)'; return; }
     status.textContent='as of '+d.asOf; status.style.color='var(--dim)';
+    const intra = document.getElementById('tf-intra-status');
+    if(intra){
+      intra.innerHTML = d.intraday_connected
+        ? '<span style="color:var(--green)">● Intraday connected ('+d.intraday_provider+') — 1H Rule is live</span>'
+        : '<span style="color:var(--amber)">○ Intraday not connected — set GROWW_API_KEY + GROWW_API_SECRET + INTRADAY_PROVIDER=groww in Railway to enable 15m / 1H signals</span>';
+    }
     renderTradeFinder(d);
   }catch(e){ status.textContent='Error: '+e.message; status.style.color='var(--red)'; }
 }
@@ -1038,6 +1046,14 @@ function renderTradeFinder(d){
     if(s==='CROSS-DN') return '<span style="color:var(--red);font-size:10px">↓ daily cross (mixed)</span>';
     return '<span style="color:var(--dim);font-size:10px">—</span>';
   };
+  const h1Cell = h => {
+    if(!h) return '<td style="text-align:center;color:var(--dim)">—</td>';
+    if(h.state==='LONG SIGNAL')  return '<td style="text-align:center"><span style="background:rgba(0,255,157,.15);color:var(--green);border:1px solid rgba(0,255,157,.4);padding:1px 6px;border-radius:3px;font-weight:700;font-size:10px">▲ 1H BUY</span></td>';
+    if(h.state==='SHORT SIGNAL') return '<td style="text-align:center"><span style="background:rgba(255,68,102,.15);color:var(--red);border:1px solid rgba(255,68,102,.4);padding:1px 6px;border-radius:3px;font-weight:700;font-size:10px">▼ 1H SELL</span></td>';
+    if(h.state==='Crossed, waiting for break') return '<td style="text-align:center;color:var(--amber);font-size:10px">crossed, waiting</td>';
+    if(h.state==='needs intraday') return '<td style="text-align:center;color:var(--dim);font-size:10px" title="Connect Groww API to enable">🔌 connect</td>';
+    return `<td style="text-align:center;color:var(--dim);font-size:10px">${h.state}</td>`;
+  };
   const tfCell = tf => {
     if(!tf) return '<td style="text-align:center;color:var(--dim)">—</td>';
     const c = tf.dir==='up'?'var(--green)':tf.dir==='dn'?'var(--red)':tf.label==='Above'?'#7ee787':tf.label==='Below'?'#ff9aaa':tf.label==='Near'?'var(--amber)':'var(--dim)';
@@ -1054,14 +1070,15 @@ function renderTradeFinder(d){
       <td style="text-align:right;color:${r.sector_chg==null?'var(--dim)':r.sector_chg>=0?'var(--green)':'var(--red)'}">${r.sector_chg==null?'—':(r.sector_chg>=0?'+':'')+r.sector_chg+'%'}</td>
       ${tfCell(r.daily)}
       ${tfCell(r.weekly)}
+      ${h1Cell(r.h1_rule)}
       <td style="text-align:center">${badge(r.setup)}</td></tr>`;
-  }).join('') || `<tr><td colspan="7" style="text-align:center;color:var(--dim);padding:14px">No stocks crossing a 200 EMA among the movers.</td></tr>`;
+  }).join('') || `<tr><td colspan="8" style="text-align:center;color:var(--dim);padding:14px">No stocks crossing a 200 EMA among the movers.</td></tr>`;
   document.getElementById('tf-results').innerHTML =
     `<div style="font-size:11px;color:#a0aec0;margin-bottom:8px">
        <b style="color:var(--gold)">${nDaily} crossing daily</b> · <b style="color:var(--cyan)">${nWeekly} crossing weekly</b> · of which <b style="color:var(--green)">${nLong} LONG</b> / <b style="color:var(--red)">${nShort} SHORT</b> (daily cross + move + sector aligned) · ${d.rows.length} movers${d.data_date?' · NSE data '+d.data_date:''} · <span style="color:var(--green)">updated ${new Date().toLocaleTimeString('en-IN')}</span> · auto-refresh 45s · click a row to backtest</div>
      <div style="max-height:560px;overflow:auto;border:1px solid var(--border);border-radius:6px">
        <table class="matrix" style="width:100%">
-         <thead><tr><th>Stock</th><th style="text-align:right">Day %</th><th>Sector</th><th style="text-align:right">Sector %</th><th style="text-align:center">Daily 200 EMA</th><th style="text-align:center">Weekly 200 EMA</th><th style="text-align:center">Signal</th></tr></thead>
+         <thead><tr><th>Stock</th><th style="text-align:right">Day %</th><th>Sector</th><th style="text-align:right">Sector %</th><th style="text-align:center">Daily 200 EMA</th><th style="text-align:center">Weekly 200 EMA</th><th style="text-align:center" title="1H 200 EMA cross + next-candle break of prior high/low">1H Rule</th><th style="text-align:center">Signal</th></tr></thead>
          <tbody>${body}</tbody></table></div>`;
 }
 
@@ -1159,6 +1176,55 @@ function renderLeaderboard(d){
        <table class="matrix" style="width:100%">
          <thead><tr><th>#</th><th>Stock</th>${th('return_pct','Return')}${th('buyhold_return_pct','Buy&Hold')}${th('vs_buyhold','vs B&H')}${th('win_rate','Win%')}${th('trades','Trades')}${th('profit_factor','PF')}${th('max_drawdown_pct','MaxDD')}</tr></thead>
          <tbody>${rows}</tbody></table></div>`;
+}
+
+async function runTfCompare(){
+  const sym = (document.getElementById('bt-symbol').value||'').trim().toUpperCase();
+  const status = document.getElementById('bt-status');
+  const out = document.getElementById('bt-results');
+  if(!sym){ status.textContent='Enter a symbol.'; status.style.color='var(--amber)'; return; }
+  status.textContent='Comparing 15m / 1H / Daily / Weekly…'; status.style.color='var(--amber)';
+  out.innerHTML='';
+  try{
+    const r = await fetch('/api/tfcompare?symbol='+encodeURIComponent(sym), {cache:'no-store'});
+    const d = await r.json();
+    if(!d.ok){ status.textContent=d.error||'Failed'; status.style.color='var(--red)'; return; }
+    status.textContent=''; renderTfCompare(d);
+  }catch(e){ status.textContent='Error: '+e.message; status.style.color='var(--red)'; }
+}
+
+function renderTfCompare(d){
+  const order = [["15m","15 min"],["1h","1 hour"],["1d","1 day"],["1w","1 week"]];
+  const pos = v => v>=0?'var(--green)':'var(--red)';
+  const rows = order.map(([k,label])=>{
+    const r = d.results[k];
+    if(!r || !r.ok){
+      const reason = r ? r.reason : '—';
+      return `<tr>
+        <td style="font-weight:700;color:#e2e8f0">${label}</td>
+        <td colspan="6" style="color:var(--dim)">${reason}</td></tr>`;
+    }
+    return `<tr>
+      <td style="font-weight:700;color:#e2e8f0">${label}</td>
+      <td style="text-align:right">${r.trades}</td>
+      <td style="text-align:right;color:${r.win_rate>=50?'var(--green)':'var(--amber)'};font-weight:700">${r.win_rate}%</td>
+      <td style="text-align:right;color:${pos(r.return_pct)};font-weight:700">${r.return_pct}%</td>
+      <td style="text-align:right;color:${r.profit_factor==null||r.profit_factor>=1?'var(--green)':'var(--red)'}">${r.profit_factor==null?'∞':r.profit_factor}</td>
+      <td style="text-align:right;color:${pos(r.avg_r)}">${r.avg_r}R</td>
+      <td style="text-align:right;color:var(--dim)">${r.n_bars}</td></tr>`;
+  }).join('');
+  const intraTag = d.intraday_connected
+    ? '<span style="color:var(--green)">● Intraday connected ('+d.intraday_provider+')</span>'
+    : '<span style="color:var(--amber)">○ Intraday not connected — 15m / 1H will fill in once GROWW_API_KEY + GROWW_API_SECRET + INTRADAY_PROVIDER=groww are set in Railway</span>';
+  document.getElementById('bt-results').innerHTML =
+    `<div style="font-size:13px;font-weight:700;color:var(--blue);margin-bottom:4px">${d.symbol} · 200 EMA cross win rate by timeframe
+       <span style="font-size:10px;color:var(--dim);font-weight:400">· same strategy, opposite-cross exit, 1% risk</span></div>
+     <div style="font-size:10px;margin-bottom:10px">${intraTag}</div>
+     <div style="border:1px solid var(--border);border-radius:6px;overflow:hidden">
+       <table class="matrix" style="width:100%">
+         <thead><tr><th>Timeframe</th><th style="text-align:right">Trades</th><th style="text-align:right">Win%</th><th style="text-align:right">Return</th><th style="text-align:right">PF</th><th style="text-align:right">Avg R</th><th style="text-align:right">Bars</th></tr></thead>
+         <tbody>${rows}</tbody></table></div>
+     <div style="font-size:10px;color:var(--dim);margin-top:8px">Tip: same stock, same rule, different timeframes — picks the timeframe where this strategy actually works best for this stock.</div>`;
 }
 
 async function runExitCompare(){
