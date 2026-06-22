@@ -28,6 +28,26 @@ import http.cookiejar
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+
+# ── Local .env loader (no extra dependency) ──────────────────────────
+# On a local Mac run, credentials live in ~/Downloads/nse-live/.env so they
+# never reach git. On Railway they come from the platform's env vars, so
+# missing .env is fine. Must run BEFORE intraday is imported.
+def _load_dotenv(path):
+    if not os.path.exists(path):
+        return
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            k = k.strip(); v = v.strip().strip('"').strip("'")
+            os.environ.setdefault(k, v)
+
+
+_load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+
 import backtest as bt
 try:
     from intraday import PROVIDER as INTRADAY
@@ -632,7 +652,35 @@ class Handler(BaseHTTPRequestHandler):
         pass  # quiet
 
 
-if __name__ == "__main__":
-    print(f"NSE live dashboard  →  http://{HOST}:{PORT}")
+def _startup_banner():
+    """Clear on-boot status: shows the user (a) whether intraday is wired up,
+    (b) whether their current public IP matches the one Groww has whitelisted.
+    Catches the most common 'why is intraday silently failing?' cause."""
+    print(f"\nNSE live dashboard  →  http://{HOST}:{PORT}")
+    if INTRADAY and INTRADAY.enabled:
+        print(f"  • Intraday provider : {INTRADAY.name}  (15m + 1H signals: ON)")
+        # Check public IP vs Groww-registered IP
+        registered = os.environ.get("GROWW_REGISTERED_IP", "").strip()
+        try:
+            req = urllib.request.Request("https://api.ipify.org",
+                                         headers={"User-Agent": "curl/8"})
+            current = urllib.request.urlopen(req, timeout=8).read().decode().strip()
+            if registered and current != registered:
+                print(f"  ⚠️  Public IP changed! Currently {current}, Groww has {registered}")
+                print(f"     Groww calls will fail until you re-register {current}.")
+            elif registered:
+                print(f"  • Public IP         : {current}  (matches Groww ✓)")
+            else:
+                print(f"  • Public IP         : {current}  (set GROWW_REGISTERED_IP in .env "
+                      f"to enable drift check)")
+        except Exception as e:
+            print(f"  • Public IP check skipped: {e}")
+    else:
+        print("  • Intraday provider : none  (15m + 1H show '🔌 connect' placeholders)")
+        print("    → Set INTRADAY_PROVIDER=groww + GROWW_API_KEY + GROWW_API_SECRET in .env")
     print("Press Ctrl+C to stop.\n")
+
+
+if __name__ == "__main__":
+    _startup_banner()
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()

@@ -2,5 +2,9 @@
 # The deployed app ships the slim prices_web.db (top-500 liquid names) instead.
 prices.db
 
+# Local credentials — Groww API key + TOTP secret. NEVER commit.
+.env
+.last-ip
+
 __pycache__/
 *.pyc

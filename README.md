@@ -27,6 +27,25 @@ pullback-and-reclaim of the 20 EMA; stop = ATR×1.5, target = 2R, risking 1%
 of equity per trade. Daily candles (free 5-year intraday data doesn't exist).
 Backtest results are not a prediction of future returns.
 
+## Local intraday mode (for the 1H + 15m signals)
+
+Groww's API requires a static IP. Railway's are shared (don't work). The
+simplest workaround: run the dashboard on your Mac and register your home IP.
+
+One-time:
+1. `cp .env.example .env` then fill in `GROWW_API_KEY` and `GROWW_API_SECRET`
+   (from groww.in → Trade APIs → Generate TOTP token).
+2. Double-click **`check-my-ip.command`**, note the IP, reboot the router,
+   run it again. If unchanged, your home IP is stable enough for Groww.
+3. Whitelist that IP in Groww (Add static IP → Primary).
+4. Optionally set `GROWW_REGISTERED_IP` in `.env` so the launcher warns you if
+   it drifts later.
+
+Daily use:
+- Double-click **`start-intraday.command`** → server boots, browser opens to
+  `http://localhost:8787`, the 1H Rule column starts firing live signals.
+- Close the terminal window to stop.
+
 ## Run locally
 
 ```bash
