@@ -94,6 +94,43 @@ def atr(h, l, c, n=14):
     return rma(tr, n)
 
 
+def adx(h, l, c, n=14):
+    """Wilder's ADX(n): trend STRENGTH (not direction). 0-100.
+       <20 = weak/no trend  ·  20-40 = trending  ·  >40 = strong trend.
+       Returns the ADX series."""
+    if len(c) < 2:
+        return [0.0] * len(c)
+    tr = [h[0] - l[0]]
+    plus_dm = [0.0]
+    minus_dm = [0.0]
+    for i in range(1, len(c)):
+        up = h[i] - h[i - 1]
+        dn = l[i - 1] - l[i]
+        plus_dm.append(up if (up > dn and up > 0) else 0.0)
+        minus_dm.append(dn if (dn > up and dn > 0) else 0.0)
+        tr.append(max(h[i] - l[i], abs(h[i] - c[i - 1]), abs(l[i] - c[i - 1])))
+    atr_s = rma(tr, n)
+    plus_di = [100 * (rma(plus_dm, n)[i] / atr_s[i] if atr_s[i] else 0) for i in range(len(c))]
+    minus_di = [100 * (rma(minus_dm, n)[i] / atr_s[i] if atr_s[i] else 0) for i in range(len(c))]
+    dx = []
+    for p, m in zip(plus_di, minus_di):
+        s = p + m
+        dx.append(100 * abs(p - m) / s if s else 0)
+    return rma(dx, n)
+
+
+def slope_pct(series, lookback=5):
+    """% change of `series` over the last `lookback` bars at each index.
+       Positive = rising, negative = falling. Used for the 200 EMA slope check."""
+    out = []
+    for i in range(len(series)):
+        if i < lookback or series[i - lookback] == 0:
+            out.append(0.0)
+        else:
+            out.append((series[i] - series[i - lookback]) / series[i - lookback] * 100)
+    return out
+
+
 # ── data ─────────────────────────────────────────────────────────────
 # Clean ticker renames: current symbol -> predecessor ticker(s) whose pre-rename
 # history we stitch on. Only pure renames (no price adjustment) — NOT demergers.

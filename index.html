@@ -347,6 +347,7 @@
     <div class="tab" onclick="showTab('workflow',this)">Daily Workflow</div>
     <div class="tab" onclick="showTab('backtest',this)" style="color:var(--gold)">🔬 Backtest (5Y)</div>
     <div class="tab" onclick="showTab('finder',this)" style="color:var(--green)">🎯 Trade Finder</div>
+    <div class="tab" onclick="showTab('bullput',this)" style="color:var(--cyan)">📈 Bull Put Setup</div>
   </div>
 
   <!-- TAB: MAIN CODE -->
@@ -588,6 +589,25 @@
       <span id="tf-status" style="font-size:11px;color:var(--dim)"></span>
     </div>
     <div id="tf-results"></div>
+  </div>
+
+  <!-- TAB: BULL PUT SETUP -->
+  <div id="tab-bullput" class="code-block" style="display:none;padding:16px">
+    <div style="margin-bottom:12px">
+      <div style="color:var(--cyan);font-size:12px;font-weight:700;letter-spacing:1px">📈 BULL PUT SPREAD · STOCK SELECTION FUNNEL</div>
+      <div style="color:var(--dim);font-size:10px;margin-top:3px;max-width:840px;line-height:1.55">
+        Automates steps 1–5 of the flowchart: (1) Sensex+Nifty bias gate · (2) NSE gainers · (3) sectoral strength ·
+        (4) F&O universe match (≥3 of 4) · (5) Daily 200 EMA above + slope up + ADX&nbsp;&gt;&nbsp;20.
+        Steps 7–9 (Max Pain · Δ 0.20–0.30 strikes · OI walls) are linked to Sensibull / NSE option chain —
+        NSE blocks those from a server, so they stay a manual click.
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+      <button onclick="runBullPut()" style="background:var(--cyan);color:#050a10;border:none;padding:8px 18px;border-radius:5px;font-weight:700;cursor:pointer;font-family:inherit;font-size:12px;letter-spacing:.5px">SCAN ▶</button>
+      <label style="font-size:11px;color:var(--cyan);cursor:pointer"><input type="checkbox" id="bp-passonly" checked onchange="renderBullPut(_bpData)" style="vertical-align:middle"> ✓ only candidates passing all daily filters</label>
+      <span id="bp-status" style="font-size:11px;color:var(--dim)"></span>
+    </div>
+    <div id="bp-results"></div>
   </div>
 </div>
 
@@ -994,7 +1014,7 @@ const pineCode = `<span class="c-comment">// ═══════════�
 function showTab(name, el){
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
-  ['main','setup','alerts','workflow','backtest','finder'].forEach(id=>{
+  ['main','setup','alerts','workflow','backtest','finder','bullput'].forEach(id=>{
     const el2 = document.getElementById('tab-'+id);
     if(el2) el2.style.display = id===name ? 'block' : 'none';
   });
@@ -1004,6 +1024,13 @@ function showTab(name, el){
       const t = document.getElementById('tab-finder');
       if(t && t.style.display!=='none') runTradeFinder();
     }, 45000);
+  }
+  if(name==='bullput'){
+    if(!_bpData) runBullPut();
+    if(!_bpTimer) _bpTimer = setInterval(()=>{
+      const t = document.getElementById('tab-bullput');
+      if(t && t.style.display!=='none') runBullPut();
+    }, 60000);
   }
 }
 
@@ -1176,6 +1203,116 @@ function renderLeaderboard(d){
        <table class="matrix" style="width:100%">
          <thead><tr><th>#</th><th>Stock</th>${th('return_pct','Return')}${th('buyhold_return_pct','Buy&Hold')}${th('vs_buyhold','vs B&H')}${th('win_rate','Win%')}${th('trades','Trades')}${th('profit_factor','PF')}${th('max_drawdown_pct','MaxDD')}</tr></thead>
          <tbody>${rows}</tbody></table></div>`;
+}
+
+// ─── BULL PUT SETUP ─────────────────────────────────────────────
+let _bpData = null, _bpTimer = null;
+
+async function runBullPut(){
+  const status = document.getElementById('bp-status');
+  const out = document.getElementById('bp-results');
+  status.textContent = 'Scanning market + sectors + F&O gainers + daily EMA/ADX…';
+  status.style.color = 'var(--amber)';
+  out.innerHTML = '';
+  try{
+    const r = await fetch('/api/bullput', {cache:'no-store'});
+    const d = await r.json();
+    if(!d.ok){ status.textContent = d.error || 'Failed'; status.style.color = 'var(--red)'; return; }
+    status.textContent = 'as of ' + (d.asOf || '');
+    status.style.color = 'var(--dim)';
+    renderBullPut(d);
+  }catch(e){ status.textContent = 'Error: '+e.message; status.style.color = 'var(--red)'; }
+}
+
+function renderBullPut(d){
+  if(!d) return;
+  _bpData = d;
+  const passOnly = document.getElementById('bp-passonly')?.checked;
+  let rows = d.rows;
+  if(passOnly) rows = rows.filter(r=>r.passes_all);
+
+  // Step 1 — Market bias banner
+  const m = d.market;
+  const ok = m.ok;
+  const bias = `<div style="border:1px solid ${ok?'rgba(0,255,157,.4)':'rgba(255,68,102,.4)'};
+      background:${ok?'rgba(0,255,157,.06)':'rgba(255,68,102,.06)'};
+      color:${ok?'var(--green)':'var(--red)'};
+      padding:10px 14px;border-radius:6px;font-size:11px;margin-bottom:10px">
+    <b style="font-size:12px">${ok?'✓ MARKET POSITIVE — PROCEED':'✗ MARKET NEGATIVE — AVOID BULL PUT'}</b>
+    <span style="color:#a0aec0;margin-left:10px">
+      NIFTY 50 ${m.nifty_chg>=0?'+':''}${m.nifty_chg}%  ·  SENSEX ${m.sensex_chg==null?'—':(m.sensex_chg>=0?'+':'')+m.sensex_chg+'%'}
+    </span>
+  </div>`;
+
+  // Step 3 — Strong sectors banner
+  const sec = (d.strong_sectors && d.strong_sectors.length)
+    ? '<div style="font-size:10px;color:var(--dim);margin-bottom:10px">Strong sectors (&gt;1%): '
+        + d.strong_sectors.map(s=>`<span style="color:var(--green);margin-right:8px">${s}</span>`).join('')
+        + '</div>'
+    : '<div style="font-size:10px;color:var(--dim);margin-bottom:10px">No sectors strongly up (&gt;1%) right now.</div>';
+
+  const matchDot = (on,label) => `<span title="${label}" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${on?'var(--green)':'#2a3656'};margin-right:3px;vertical-align:middle"></span>`;
+  const yes = '<span style="color:var(--green);font-weight:700">✓</span>';
+  const no  = '<span style="color:var(--red);font-weight:700">✗</span>';
+  const dash = '<span style="color:var(--dim)">—</span>';
+
+  const body = rows.map(r=>{
+    const f = r.fo_match.filters;
+    const da = r.daily;
+    const dot = (k,t) => matchDot(f[k], t);
+    const dailyCell = da.ok
+      ? `<td style="text-align:center;font-size:10px">
+           <span style="color:${da.above_ema?'var(--green)':'var(--red)'}">${da.above_ema?'▲':'▼'} EMA</span>
+           &nbsp;<span style="color:${da.rising_ema?'var(--green)':'var(--red)'}">slope ${da.ema_slope_pct>=0?'+':''}${da.ema_slope_pct}%</span>
+           &nbsp;<span style="color:${da.adx_trending?'var(--green)':'var(--amber)'}">ADX ${da.adx}</span>
+         </td>`
+      : `<td style="text-align:center;color:var(--dim);font-size:10px">no data</td>`;
+    const verdict = r.passes_all
+      ? '<span style="background:rgba(0,255,157,.15);color:var(--green);border:1px solid rgba(0,255,157,.4);padding:1px 7px;border-radius:3px;font-weight:700;font-size:10px">✓ ALL PASS</span>'
+      : (da.ok && da.passes ? '<span style="color:var(--amber);font-size:10px">daily ✓ · market gated</span>'
+                            : '<span style="color:var(--dim);font-size:10px">—</span>');
+    const tint = r.passes_all ? 'background:rgba(0,255,157,.06)' : '';
+    return `<tr style="cursor:pointer;${tint}" onclick="document.querySelector('.tab[onclick*=backtest]').click();document.getElementById('bt-symbol').value='${r.symbol}';runBacktest();">
+      <td style="font-weight:700;color:#e2e8f0">${r.passes_all?'★ ':''}${r.symbol}</td>
+      <td style="color:var(--green);text-align:right;font-weight:700">+${r.chg}%</td>
+      <td style="color:#a0aec0">${r.sector}</td>
+      <td style="text-align:right;color:${r.sector_chg==null?'var(--dim)':r.sector_chg>=0?'var(--green)':'var(--red)'}">${r.sector_chg==null?'—':(r.sector_chg>=0?'+':'')+r.sector_chg+'%'}</td>
+      <td style="text-align:center;white-space:nowrap">
+        ${dot('fo','F&O member')}${dot('fo_gainer','F&O gainer')}${dot('nifty50_gainer','Nifty 50 gainer')}${dot('strong_sector','Strong sector')}
+        <span style="color:#a0aec0;font-size:10px;margin-left:4px">${r.fo_match.score}/4</span>
+      </td>
+      ${dailyCell}
+      <td style="text-align:center">${verdict}</td>
+      <td style="text-align:center;white-space:nowrap">
+        <a onclick="event.stopPropagation()" href="${r.links.sensibull}" target="_blank" rel="noopener" style="color:var(--cyan);font-size:10px;text-decoration:none;margin-right:6px">Sensibull ↗</a>
+        <a onclick="event.stopPropagation()" href="${r.links.nse_chain}" target="_blank" rel="noopener" style="color:var(--cyan);font-size:10px;text-decoration:none">NSE ↗</a>
+      </td>
+    </tr>`;
+  }).join('') || `<tr><td colspan="8" style="text-align:center;color:var(--dim);padding:14px">${d.n_candidates===0?'No F&O gainers right now.':'No candidates pass all daily filters. Uncheck the filter to see partial matches.'}</td></tr>`;
+
+  document.getElementById('bp-results').innerHTML =
+    `${bias}${sec}
+     <div style="font-size:11px;color:#a0aec0;margin-bottom:8px">
+       <b style="color:var(--cyan)">${d.n_pass}/${d.n_candidates}</b> candidates pass all daily filters · auto-refresh 60s · click a row to backtest
+     </div>
+     <div style="max-height:560px;overflow:auto;border:1px solid var(--border);border-radius:6px">
+       <table class="matrix" style="width:100%">
+         <thead><tr>
+           <th>Stock</th>
+           <th style="text-align:right">Day %</th>
+           <th>Sector</th>
+           <th style="text-align:right">Sector %</th>
+           <th style="text-align:center" title="F&O member · F&O gainer · Nifty 50 gainer · Strong sector">F&O Match</th>
+           <th style="text-align:center">Daily (EMA · slope · ADX)</th>
+           <th style="text-align:center">Funnel</th>
+           <th style="text-align:center" title="Manual steps 7-9: Max Pain · Δ strikes · OI">Step 7–9</th>
+         </tr></thead>
+         <tbody>${body}</tbody></table></div>
+     <div style="font-size:10px;color:var(--dim);margin-top:8px">
+       Steps 7–9 (Max Pain ≥ CMP · Sell PE Δ 0.20–0.30 · OI walls below CMP) are not auto-fetched —
+       NSE blocks the option chain from server IPs. Click <b style="color:var(--cyan)">Sensibull ↗</b> on a row to verify those manually before entry.
+       Step 10 (15-min pullback) needs intraday — pending Groww connect.
+     </div>`;
 }
 
 async function runTfCompare(){

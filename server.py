@@ -501,6 +501,167 @@ def cached_tradefinder(universe):
     return d
 
 
+# ── Bull Put Spread setup screener ───────────────────────────────────
+# Implements the documented 10-step funnel (steps 1-5 automated; steps 7-9 need
+# the option chain, which NSE blocks from datacenter IPs — so those become
+# "open in Sensibull / NSE option chain" manual links).
+try:
+    with open(os.path.join(HERE, "fo_list.json")) as _f:
+        FO_LIST = set(json.load(_f))
+except Exception:
+    FO_LIST = set()
+
+
+_bullput_cache = {"t": 0.0, "data": None}
+
+
+def _stock_daily_indicators(sym):
+    """Returns dict with last close, 200 EMA, EMA slope%, ADX(14) — or None."""
+    try:
+        bars = bt.load(sym)
+        if len(bars) < 250:
+            return None
+        h = [b["h"] for b in bars]; l = [b["l"] for b in bars]; c = [b["c"] for b in bars]
+        e200 = bt.ema(c, 200)
+        adx = bt.adx(h, l, c, 14)
+        slope = bt.slope_pct(e200, 5)
+        return {"close": c[-1], "ema200": e200[-1],
+                "slope_pct": slope[-1], "adx": adx[-1]}
+    except Exception:
+        return None
+
+
+def build_bullput():
+    all_idx = nse_get("/api/allIndices")
+    by_name = {r.get("index"): float(r.get("percentChange", 0))
+               for r in all_idx.get("data", [])}
+    nifty50_chg = by_name.get("NIFTY 50", 0)
+
+    sensex_data = None
+    try:
+        sensex_data = fetch_sensex()
+    except Exception:
+        pass
+    sensex_chg = None
+    if sensex_data:
+        try:
+            sensex_chg = float(sensex_data["chg"].replace("%", "").replace("+", ""))
+        except Exception:
+            sensex_chg = None
+
+    # STEP 1: Market bias gate — both Sensex & Nifty must be positive.
+    market_ok = (nifty50_chg > 0) and (sensex_chg is not None and sensex_chg > 0)
+
+    # STEP 3: Sector strength — find sectors > 0.5%, mark "strong" if > 1%.
+    strong_sectors = {disp for disp, ch in (
+        (r.get("index"), float(r.get("percentChange", 0)))
+        for r in all_idx.get("data", []))
+        if disp and ch > 1.0 and disp.startswith("NIFTY") and disp != "NIFTY 50"}
+
+    # STEP 2: gainers from F&O bucket of live-analysis-variations
+    def variations(kind, bucket):
+        d = nse_get("/api/live-analysis-variations?index=" + kind)
+        return (d.get(bucket) or {}).get("data", [])
+
+    fo_gainers = variations("gainers", "FOSec")
+    nifty50_gainers_set = {s.get("symbol") for s in variations("gainers", "NIFTY")}
+    fo_gainers_set = {s.get("symbol") for s in fo_gainers}
+
+    rows = []
+    for s in fo_gainers:
+        sym = s.get("symbol")
+        if not sym:
+            continue
+        ch = float(s.get("perChange", 0))
+        if ch <= 0:                    # we only want upside momentum for Bull Put
+            continue
+        ltp = float(s.get("ltp", 0) or 0)
+
+        # STEP 4: F&O universe matching (out of 4) — F&O member, F&O gainer,
+        # in Nifty 50 gainers (optional), part of a strong sector.
+        sectors = SECTOR_MAP.get(sym, [])
+        sector_chgs = [(d, by_name.get(d.upper())) for d in sectors
+                       if by_name.get(d.upper()) is not None]
+        rep_sector = max(sector_chgs, key=lambda x: x[1]) if sector_chgs else None
+        in_strong_sector = rep_sector and rep_sector[0] in strong_sectors
+
+        match_filters = {
+            "fo": sym in FO_LIST,
+            "fo_gainer": sym in fo_gainers_set,
+            "nifty50_gainer": sym in nifty50_gainers_set,
+            "strong_sector": bool(in_strong_sector),
+        }
+        match_score = sum(match_filters.values())
+
+        # STEP 5: Daily timeframe confirmation — price > 200 EMA, EMA rising, ADX
+        ind = _stock_daily_indicators(sym)
+        if not ind:
+            daily = {"ok": False, "reason": "no data"}
+            daily_pass = False
+        else:
+            above = ind["close"] > ind["ema200"]
+            rising = ind["slope_pct"] > 0
+            trending = ind["adx"] > 20
+            daily_pass = above and rising and trending
+            daily = {
+                "ok": True, "close": round(ind["close"], 2),
+                "ema200": round(ind["ema200"], 2),
+                "above_ema": above, "rising_ema": rising,
+                "ema_slope_pct": round(ind["slope_pct"], 2),
+                "adx": round(ind["adx"], 1), "adx_trending": trending,
+                "passes": daily_pass,
+            }
+
+        # Funnel verdict
+        passes_step4 = match_score >= 3
+        all_pass = market_ok and passes_step4 and daily_pass
+
+        rows.append({
+            "symbol": sym, "chg": round(ch, 2), "ltp": round(ltp, 2),
+            "sector": rep_sector[0] if rep_sector else "—",
+            "sector_chg": round(rep_sector[1], 2) if rep_sector else None,
+            "fo_match": {"score": match_score, "filters": match_filters},
+            "daily": daily,
+            "passes_all": all_pass,
+            "links": {
+                "sensibull": f"https://web.sensibull.com/option-chain?tradingsymbol={sym}",
+                "nse_chain": f"https://www.nseindia.com/option-chain?symbol={sym}",
+            },
+        })
+
+    # Rank: passes_all first, then by match_score, then by % change
+    rows.sort(key=lambda r: (
+        r["passes_all"], r["fo_match"]["score"],
+        r["daily"]["passes"] if r["daily"].get("ok") else False,
+        r["chg"]), reverse=True)
+
+    return {
+        "ok": True,
+        "asOf": (all_idx.get("timestamp", "") or "")[-8:],
+        "market": {
+            "nifty_chg": round(nifty50_chg, 2),
+            "sensex_chg": round(sensex_chg, 2) if sensex_chg is not None else None,
+            "ok": market_ok,
+            "note": ("Both indices positive — proceed." if market_ok
+                     else "Market not positive on both indices — AVOID Bull Put Spread."),
+        },
+        "strong_sectors": sorted(strong_sectors),
+        "n_pass": sum(1 for r in rows if r["passes_all"]),
+        "n_candidates": len(rows),
+        "rows": rows,
+    }
+
+
+def cached_bullput():
+    now = time.time()
+    if _bullput_cache["data"] and now - _bullput_cache["t"] < 45:
+        return _bullput_cache["data"]
+    d = build_bullput()
+    _bullput_cache["data"] = d
+    _bullput_cache["t"] = now
+    return d
+
+
 # ── backtest cache (deterministic per symbol + parameter set) ────────
 _bt_cache = {}
 
@@ -590,6 +751,12 @@ class Handler(BaseHTTPRequestHandler):
                                      is not None else -1e9), reverse=True)
             body = json.dumps({"ok": True, "rows": rows, "config": config})
             return self._send(200, body.encode("utf-8"), "application/json")
+        if self.path.startswith("/api/bullput"):
+            try:
+                rep = cached_bullput()
+            except Exception as e:
+                rep = {"ok": False, "error": str(e), "rows": []}
+            return self._send(200, json.dumps(rep).encode("utf-8"), "application/json")
         if self.path.startswith("/api/tradefinder"):
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             uni = q.get("universe", ["nifty50"])[0]
