@@ -22,16 +22,26 @@ def run():
         "User-Agent": UA, "Referer": "https://www.nseindia.com/"})
     text = urllib.request.urlopen(req, timeout=20).read().decode("utf-8", "ignore")
     syms = []
+    lots = {}                  # symbol -> nearest-expiry lot size
     for row in csv.reader(io.StringIO(text)):
-        if len(row) < 2:
+        if len(row) < 3:
             continue
         sym = row[1].strip().upper()
-        if sym and sym not in EXCLUDE and not sym.startswith("UNDERLY"):
-            syms.append(sym)
+        if not sym or sym in EXCLUDE or sym.startswith("UNDERLY"):
+            continue
+        syms.append(sym)
+        # Column index 2 is the nearest expiry's lot size in NSE's CSV format.
+        for cell in row[2:]:
+            cell = (cell or "").strip()
+            if cell.isdigit():
+                lots[sym] = int(cell)
+                break
     syms = sorted(set(syms))
     json.dump(syms, open("fo_list.json", "w"))
+    json.dump(lots, open("lot_sizes.json", "w"))
     print(f"Wrote fo_list.json: {len(syms)} F&O underlyings")
-    print("Sample:", syms[:10])
+    print(f"Wrote lot_sizes.json: {len(lots)} lot sizes")
+    print("Sample:", [(s, lots.get(s)) for s in syms[:5]])
 
 
 if __name__ == "__main__":

@@ -153,6 +153,10 @@
   .bt-field{display:flex;flex-direction:column;gap:3px;font-size:9px;color:var(--dim);letter-spacing:.5px;text-transform:uppercase;font-weight:700}
   .bt-field select,.bt-field input{background:#050a10;border:1px solid var(--border);color:#e2e8f0;padding:6px 8px;border-radius:4px;font-family:inherit;font-size:12px;text-transform:none;font-weight:400}
   .bt-field input{width:108px}
+  .pos-field{display:flex;flex-direction:column;gap:3px;font-size:9px;color:var(--dim);letter-spacing:.5px;text-transform:uppercase;font-weight:700}
+  .pos-field input{background:#050a10;border:1px solid var(--border);color:#e2e8f0;padding:6px 8px;border-radius:4px;font-family:inherit;font-size:12px;text-transform:none;font-weight:400;width:100%}
+  @keyframes flashAlert{0%,100%{opacity:1}50%{opacity:.4}}
+  .pos-alert-flash{animation:flashAlert 1s ease-in-out 3}
 </style>
 </head>
 <body>
@@ -348,6 +352,7 @@
     <div class="tab" onclick="showTab('backtest',this)" style="color:var(--gold)">🔬 Backtest (5Y)</div>
     <div class="tab" onclick="showTab('finder',this)" style="color:var(--green)">🎯 Trade Finder</div>
     <div class="tab" onclick="showTab('bullput',this)" style="color:var(--cyan)">📈 Bull Put Setup</div>
+    <div class="tab" onclick="showTab('positions',this)" style="color:var(--purple)">📊 Positions <span id="pos-count-badge" style="background:#1a2744;color:var(--purple);font-size:9px;padding:1px 6px;border-radius:8px;margin-left:4px"></span></div>
   </div>
 
   <!-- TAB: MAIN CODE -->
@@ -608,6 +613,41 @@
       <span id="bp-status" style="font-size:11px;color:var(--dim)"></span>
     </div>
     <div id="bp-results"></div>
+  </div>
+
+  <!-- TAB: POSITIONS -->
+  <div id="tab-positions" class="code-block" style="display:none;padding:16px">
+    <div style="margin-bottom:12px">
+      <div style="color:var(--purple);font-size:12px;font-weight:700;letter-spacing:1px">📊 BULL PUT SPREAD · POSITION TRACKER</div>
+      <div style="color:var(--dim);font-size:10px;margin-top:3px;max-width:840px;line-height:1.55">
+        Log each spread once. Paste the <b>current spread cost</b> (the price to buy it back, from Sensibull or your broker)
+        whenever you check — page instantly shows % profit and fires the 50% / 70% / SL banner.
+        All positions stay in your browser (localStorage); nothing is sent to a server.
+      </div>
+      <div id="pos-alert" style="display:none;margin-top:10px"></div>
+    </div>
+
+    <!-- Add-position form -->
+    <details id="pos-form-wrap" style="margin-bottom:12px;background:#0a1420;border:1px solid var(--border);border-radius:6px">
+      <summary style="cursor:pointer;padding:10px 14px;color:var(--purple);font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase">+ Add a Bull Put Spread position</summary>
+      <div style="padding:0 14px 14px 14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px">
+        <label class="pos-field">Stock<input id="pos-symbol" placeholder="e.g. RELIANCE" style="text-transform:uppercase"></label>
+        <label class="pos-field">Expiry<input id="pos-expiry" type="date"></label>
+        <label class="pos-field">Sell PE strike<input id="pos-sell" type="number" step="0.05" placeholder="e.g. 1400"></label>
+        <label class="pos-field">Buy PE strike (hedge)<input id="pos-buy" type="number" step="0.05" placeholder="e.g. 1380"></label>
+        <label class="pos-field">Net credit received (₹/share)<input id="pos-credit" type="number" step="0.05" placeholder="e.g. 8.50"></label>
+        <label class="pos-field">Lots<input id="pos-lots" type="number" step="1" value="1" min="1"></label>
+        <label class="pos-field">Lot size (auto-fills)<input id="pos-lotsize" type="number" step="1" placeholder="e.g. 500"></label>
+        <label class="pos-field">Entry date<input id="pos-entry" type="date"></label>
+        <div style="grid-column:1/-1;display:flex;gap:10px;align-items:center;margin-top:4px">
+          <button onclick="savePosition()" style="background:var(--purple);color:#050a10;border:none;padding:8px 18px;border-radius:5px;font-weight:700;cursor:pointer;font-family:inherit;font-size:12px;letter-spacing:.5px">SAVE POSITION</button>
+          <button onclick="clearPositionForm()" style="background:transparent;border:1px solid var(--border);color:var(--dim);padding:8px 14px;border-radius:5px;cursor:pointer;font-family:inherit;font-size:11px">Reset</button>
+          <span id="pos-form-status" style="font-size:11px;color:var(--dim)"></span>
+        </div>
+      </div>
+    </details>
+
+    <div id="pos-list"></div>
   </div>
 </div>
 
@@ -1014,7 +1054,7 @@ const pineCode = `<span class="c-comment">// ═══════════�
 function showTab(name, el){
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
-  ['main','setup','alerts','workflow','backtest','finder','bullput'].forEach(id=>{
+  ['main','setup','alerts','workflow','backtest','finder','bullput','positions'].forEach(id=>{
     const el2 = document.getElementById('tab-'+id);
     if(el2) el2.style.display = id===name ? 'block' : 'none';
   });
@@ -1032,6 +1072,7 @@ function showTab(name, el){
       if(t && t.style.display!=='none') runBullPut();
     }, 60000);
   }
+  if(name==='positions') renderPositions();
 }
 
 // ─── TRADE FINDER ─────────────────────────────────────────────────
@@ -1284,8 +1325,9 @@ function renderBullPut(d){
       ${dailyCell}
       <td style="text-align:center">${verdict}</td>
       <td style="text-align:center;white-space:nowrap">
-        <a onclick="event.stopPropagation()" href="${r.links.sensibull}" target="_blank" rel="noopener" style="color:var(--cyan);font-size:10px;text-decoration:none;margin-right:6px">Sensibull ↗</a>
-        <a onclick="event.stopPropagation()" href="${r.links.nse_chain}" target="_blank" rel="noopener" style="color:var(--cyan);font-size:10px;text-decoration:none">NSE ↗</a>
+        <a onclick="event.stopPropagation()" href="${r.links.sensibull}" target="_blank" rel="noopener" style="color:var(--cyan);font-size:10px;text-decoration:none;margin-right:6px" title="Verify Max Pain ≥ CMP, find Sell-PE Δ 0.20-0.30 strikes, check OI walls">Sensibull ↗</a>
+        <a onclick="event.stopPropagation()" href="${r.links.nse_chain}" target="_blank" rel="noopener" style="color:var(--cyan);font-size:10px;text-decoration:none;margin-right:6px" title="NSE official option chain">NSE ↗</a>
+        <span onclick="event.stopPropagation();prefillFromBullPut('${r.symbol}', ${r.lot_size||'null'})" style="color:var(--purple);font-size:10px;cursor:pointer;font-weight:700" title="Pre-fill Positions form with this stock">📊 Log</span>
       </td>
     </tr>`;
   }).join('') || `<tr><td colspan="8" style="text-align:center;color:var(--dim);padding:14px">${d.n_candidates===0?'No F&O gainers right now.':'No candidates pass all daily filters. Uncheck the filter to see partial matches.'}</td></tr>`;
@@ -1298,14 +1340,14 @@ function renderBullPut(d){
      <div style="max-height:560px;overflow:auto;border:1px solid var(--border);border-radius:6px">
        <table class="matrix" style="width:100%">
          <thead><tr>
-           <th>Stock</th>
-           <th style="text-align:right">Day %</th>
-           <th>Sector</th>
-           <th style="text-align:right">Sector %</th>
-           <th style="text-align:center" title="F&O member · F&O gainer · Nifty 50 gainer · Strong sector">F&O Match</th>
-           <th style="text-align:center">Daily (EMA · slope · ADX)</th>
-           <th style="text-align:center">Funnel</th>
-           <th style="text-align:center" title="Manual steps 7-9: Max Pain · Δ strikes · OI">Step 7–9</th>
+           <th title="NSE F&O stock symbol">Stock</th>
+           <th style="text-align:right" title="% change today (live)">Day %</th>
+           <th title="Most representative sector index for this stock">Sector</th>
+           <th style="text-align:right" title="% change of that sector today; >1% = STRONG">Sector %</th>
+           <th style="text-align:center" title="4 filters: F&O member · F&O gainer · Nifty 50 gainer · Strong sector (>1%). Need ≥3 to pass step 4.">F&O Match</th>
+           <th style="text-align:center" title="Step 5: price > 200 EMA  ·  EMA slope (5-day) up  ·  ADX(14) > 20 (trending)">Daily (EMA · slope · ADX)</th>
+           <th style="text-align:center" title="Funnel verdict — green only when market OK + step 4 + step 5 all pass">Funnel</th>
+           <th style="text-align:center" title="Steps 7-9 (Max Pain ≥ CMP · Sell-PE Δ 0.20-0.30 · OI walls) — verify manually on Sensibull. Use 📊 Log to start a position.">Step 7–9 / Log</th>
          </tr></thead>
          <tbody>${body}</tbody></table></div>
      <div style="font-size:10px;color:var(--dim);margin-top:8px">
@@ -1313,6 +1355,283 @@ function renderBullPut(d){
        NSE blocks the option chain from server IPs. Click <b style="color:var(--cyan)">Sensibull ↗</b> on a row to verify those manually before entry.
        Step 10 (15-min pullback) needs intraday — pending Groww connect.
      </div>`;
+}
+
+// ─── POSITION TRACKER (Bull Put Spread) ─────────────────────────────
+// Stored client-side in localStorage so positions survive reloads. No server.
+const POS_KEY = 'bullput_positions_v1';
+const ALERT_KEY = 'bullput_alerts_seen_v1';   // {posId: lastBadge}  prevents re-alert spam
+
+function loadPositions(){
+  try { return JSON.parse(localStorage.getItem(POS_KEY) || '[]'); } catch(e){ return []; }
+}
+function savePositionsArr(arr){
+  localStorage.setItem(POS_KEY, JSON.stringify(arr));
+  // Update the tab badge so the user sees position count even on other tabs
+  const b = document.getElementById('pos-count-badge');
+  if(b) b.textContent = arr.length ? arr.length : '';
+}
+function loadAlertsSeen(){
+  try { return JSON.parse(localStorage.getItem(ALERT_KEY) || '{}'); } catch(e){ return {}; }
+}
+function saveAlertsSeen(o){ localStorage.setItem(ALERT_KEY, JSON.stringify(o)); }
+
+// When a stock is clicked on the Bull Put tab, populate the form here.
+function prefillFromBullPut(sym, lotSize){
+  showTab('positions', [...document.querySelectorAll('.tab')].find(t=>t.textContent.includes('Positions')));
+  document.getElementById('pos-form-wrap').open = true;
+  document.getElementById('pos-symbol').value = sym;
+  if(lotSize) document.getElementById('pos-lotsize').value = lotSize;
+  document.getElementById('pos-entry').value = new Date().toISOString().slice(0,10);
+  document.getElementById('pos-symbol').focus();
+}
+
+function savePosition(){
+  const g = id => document.getElementById(id);
+  const symbol = (g('pos-symbol').value||'').trim().toUpperCase();
+  const sell = parseFloat(g('pos-sell').value);
+  const buy = parseFloat(g('pos-buy').value);
+  const credit = parseFloat(g('pos-credit').value);
+  const lots = parseInt(g('pos-lots').value) || 1;
+  const lotSize = parseInt(g('pos-lotsize').value);
+  const expiry = g('pos-expiry').value;
+  const entry = g('pos-entry').value || new Date().toISOString().slice(0,10);
+  const status = g('pos-form-status');
+  if(!symbol || !sell || !buy || !credit || !lotSize){
+    status.textContent = 'Fill stock, strikes, net credit and lot size.';
+    status.style.color = 'var(--red)';
+    return;
+  }
+  if(sell <= buy){
+    status.textContent = 'For a Bull Put: sell strike must be HIGHER than buy (hedge) strike.';
+    status.style.color = 'var(--red)';
+    return;
+  }
+  const width = sell - buy;
+  if(credit >= width){
+    status.textContent = `Credit ${credit} ≥ spread width ${width}. Double-check the inputs.`;
+    status.style.color = 'var(--amber)';
+    return;
+  }
+  const arr = loadPositions();
+  arr.push({
+    id: Date.now() + '_' + Math.random().toString(36).slice(2,7),
+    symbol, sell, buy, credit, lots, lotSize, expiry, entry,
+    currentCost: null,                 // user fills in later to check P&L
+    closed: false,
+  });
+  savePositionsArr(arr);
+  status.textContent = '✓ Position saved.';
+  status.style.color = 'var(--green)';
+  clearPositionForm();
+  renderPositions();
+}
+
+function clearPositionForm(){
+  ['pos-symbol','pos-sell','pos-buy','pos-credit','pos-expiry','pos-entry'].forEach(id=>{
+    const el = document.getElementById(id); if(el) el.value = '';
+  });
+  document.getElementById('pos-lots').value = 1;
+  document.getElementById('pos-lotsize').value = '';
+}
+
+function updateCurrentCost(posId, val){
+  const arr = loadPositions();
+  const p = arr.find(x=>x.id===posId);
+  if(!p) return;
+  p.currentCost = val === '' ? null : parseFloat(val);
+  savePositionsArr(arr);
+  renderPositions();
+}
+function deletePosition(posId){
+  if(!confirm('Delete this position?')) return;
+  savePositionsArr(loadPositions().filter(x=>x.id!==posId));
+  renderPositions();
+}
+function togglePositionClosed(posId){
+  const arr = loadPositions();
+  const p = arr.find(x=>x.id===posId);
+  if(p){ p.closed = !p.closed; savePositionsArr(arr); renderPositions(); }
+}
+
+// Status engine: maps current spread cost → state badge.
+//
+// For a Bull Put SOLD at `credit`:
+//   profit/contract  = credit - currentCost
+//   profit % of max  = (credit - currentCost) / credit         // max = credit
+//   SL hit when      = currentCost >= width  (spread can't lose more than its width minus credit)
+function positionState(p){
+  const width = p.sell - p.buy;
+  const max_profit_per = p.credit;
+  const max_loss_per = width - p.credit;
+  // Targets in currentCost terms:
+  const t50 = p.credit * 0.5;          // 50% profit  -> spread should cost half the credit
+  const t70 = p.credit * 0.3;          // 70% profit  -> spread should cost 30% of the credit
+  const slCost = width;                 // SL at width = max loss
+  const out = {
+    width, max_profit_per, max_loss_per,
+    target50_cost: t50, target70_cost: t70, sl_cost: slCost,
+    badge: null, profitPct: null, profit: null, lockedSL: null,
+  };
+  if(p.currentCost == null) { out.badge = 'OPEN'; return out; }
+  out.profit = (p.credit - p.currentCost);
+  out.profitPct = (out.profit / p.credit) * 100;
+  // 50% locked-SL: once 70% hit, treat 50% (cost = t50) as the trailing stop.
+  // Flowchart: "At 70% Profit: Apply strict SL, Let remaining run for decay".
+  if(p.currentCost <= t70) {
+    out.badge = '70_LOCK';
+    out.lockedSL = t50;
+  } else if (p.currentCost <= t50) {
+    out.badge = '50_HIT';
+  } else if (p.currentCost >= slCost) {
+    out.badge = 'SL_HIT';
+  } else if (out.profit < 0) {
+    out.badge = 'LOSING';
+  } else {
+    out.badge = 'OPEN';
+  }
+  return out;
+}
+
+// Visual banner whenever a position crosses into a NEW alertable state.
+// Each position only re-alerts when its state actually changes vs last time;
+// closing/deleting a position clears its memory.
+function checkPositionAlerts(){
+  const arr = loadPositions();
+  const seen = loadAlertsSeen();
+  // Drop any stale memory for positions that no longer exist or are closed.
+  const live = new Set(arr.filter(p=>!p.closed).map(p=>p.id));
+  for(const k of Object.keys(seen)) if(!live.has(k)) delete seen[k];
+
+  let newest = null;
+  const alertable = new Set(['50_HIT','70_LOCK','SL_HIT']);
+  for(const p of arr){
+    if(p.closed) continue;
+    const st = positionState(p);
+    if(!alertable.has(st.badge)) { seen[p.id] = st.badge; continue; }
+    if(seen[p.id] !== st.badge){
+      newest = {p, st};
+      seen[p.id] = st.badge;
+    }
+  }
+  saveAlertsSeen(seen);
+  if(newest) showPositionAlert(newest.p, newest.st);
+  else {
+    // No new transition — hide any stale banner if the underlying state moved on.
+    const banner = document.getElementById('pos-alert');
+    if(banner) banner.style.display = 'none';
+  }
+}
+
+function showPositionAlert(p, st){
+  const banner = document.getElementById('pos-alert');
+  if(!banner) return;
+  const messages = {
+    '50_HIT':   {color:'var(--green)', text:`🎯 50% TARGET HIT — ${p.symbol} ${p.sell}/${p.buy} PE · book half or watch toward 70%.`},
+    '70_LOCK':  {color:'var(--cyan)',  text:`🔒 70% PROFIT — ${p.symbol} ${p.sell}/${p.buy} PE · LOCK 50% (cost ${p.credit*0.5}) as tight SL; let the rest decay.`},
+    'SL_HIT':   {color:'var(--red)',   text:`🚨 STOP LOSS HIT — ${p.symbol} ${p.sell}/${p.buy} PE · exit now (cost reached spread width).`},
+  };
+  const m = messages[st.badge]; if(!m) return;
+  banner.innerHTML = `<div class="pos-alert-flash" style="border:1px solid ${m.color};background:#0a1420;color:${m.color};padding:10px 14px;border-radius:6px;font-weight:700;font-size:13px;display:flex;justify-content:space-between;align-items:center">
+    <span>${m.text}</span>
+    <span onclick="document.getElementById('pos-alert').style.display='none'" style="cursor:pointer;color:var(--dim);font-weight:400;font-size:11px">dismiss ×</span>
+  </div>`;
+  banner.style.display = 'block';
+  try{ // tiny beep so it grabs attention even if the tab is off-screen
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    const o = ctx.createOscillator(); const g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.frequency.value = st.badge==='SL_HIT' ? 220 : 660;
+    g.gain.value = .08; o.start();
+    setTimeout(()=>{o.stop(); ctx.close().catch(()=>{});}, 180);
+  }catch(e){}
+}
+
+function renderPositions(){
+  const arr = loadPositions();
+  // Update tab badge
+  const b = document.getElementById('pos-count-badge');
+  if(b) b.textContent = arr.length ? arr.length : '';
+
+  const list = document.getElementById('pos-list');
+  if(!list) return;
+  if(!arr.length){
+    list.innerHTML = `<div style="text-align:center;color:var(--dim);padding:30px;border:1px dashed var(--border);border-radius:6px">
+      No positions yet. Open <b style="color:var(--cyan)">📈 Bull Put Setup</b>, find a ★ candidate, and click <b style="color:var(--purple)">📊 Log</b> on its row — or use the form above.</div>`;
+    checkPositionAlerts();
+    return;
+  }
+  const inr = n => '₹'+Number(n).toLocaleString('en-IN', {maximumFractionDigits:2});
+  const cards = arr.map(p => {
+    const st = positionState(p);
+    const totalCredit = p.credit * p.lots * p.lotSize;
+    const totalMaxLoss = st.max_loss_per * p.lots * p.lotSize;
+    const totalProfit = st.profit != null ? st.profit * p.lots * p.lotSize : null;
+    const badgeMap = {
+      'OPEN':     {bg:'#1a2744', col:'#a0aec0', txt:'OPEN'},
+      'LOSING':   {bg:'rgba(255,179,71,.15)', col:'var(--amber)', txt:'IN RED'},
+      '50_HIT':   {bg:'rgba(0,255,157,.18)', col:'var(--green)', txt:'🎯 50% TARGET HIT'},
+      '70_LOCK':  {bg:'rgba(0,229,255,.18)', col:'var(--cyan)',  txt:'🔒 70% — LOCK 50% AS TIGHT SL'},
+      'SL_HIT':   {bg:'rgba(255,68,102,.20)', col:'var(--red)',  txt:'🚨 SL HIT — EXIT'},
+    }[st.badge] || {bg:'#1a2744', col:'#a0aec0', txt:st.badge};
+    const closedTint = p.closed ? 'opacity:.45' : '';
+
+    // Live thermometer of currentCost vs key levels
+    let bar = '';
+    if(p.currentCost != null){
+      // 0 cost = 100% profit, width cost = max loss
+      const pos = Math.max(0, Math.min(100, (p.currentCost / st.width) * 100));
+      const p70 = (st.target70_cost / st.width) * 100;
+      const p50 = (st.target50_cost / st.width) * 100;
+      bar = `<div style="position:relative;height:8px;background:#1a2744;border-radius:4px;margin:6px 0">
+        <div style="position:absolute;left:0;top:0;bottom:0;width:${p70}%;background:rgba(0,229,255,.25)"></div>
+        <div style="position:absolute;left:${p70}%;top:0;bottom:0;width:${p50-p70}%;background:rgba(0,255,157,.25)"></div>
+        <div style="position:absolute;left:${pos}%;top:-2px;bottom:-2px;width:2px;background:#fff"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--dim)">
+        <span>cost 0 (100% profit)</span><span style="color:var(--cyan)">70% @ ${inr(st.target70_cost)}</span>
+        <span style="color:var(--green)">50% @ ${inr(st.target50_cost)}</span><span style="color:var(--red)">SL @ ${inr(st.sl_cost)}</span>
+      </div>`;
+    }
+
+    return `<div style="border:1px solid var(--border);background:#0a1420;border-radius:6px;padding:12px;margin-bottom:10px;${closedTint}">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px">
+        <div>
+          <span style="font-size:14px;font-weight:700;color:#e2e8f0">${p.symbol}</span>
+          <span style="font-size:10px;color:var(--dim);margin-left:8px">${p.sell} / ${p.buy} PE · ${p.lots} lot${p.lots>1?'s':''} × ${p.lotSize}${p.expiry?' · exp '+p.expiry:''}${p.entry?' · entered '+p.entry:''}</span>
+        </div>
+        <span style="background:${badgeMap.bg};color:${badgeMap.col};border:1px solid ${badgeMap.col};padding:3px 10px;border-radius:4px;font-weight:700;font-size:11px">${badgeMap.txt}</span>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;font-size:11px;color:#a0aec0;margin-bottom:8px">
+        <div><div style="color:var(--dim);font-size:9px;text-transform:uppercase">Net credit</div><div style="color:var(--green);font-weight:700">${inr(totalCredit)}</div></div>
+        <div><div style="color:var(--dim);font-size:9px;text-transform:uppercase">Max loss</div><div style="color:var(--red);font-weight:700">${inr(totalMaxLoss)}</div></div>
+        <div><div style="color:var(--dim);font-size:9px;text-transform:uppercase">Break-even</div><div>${inr(p.sell - p.credit)}</div></div>
+        <div><div style="color:var(--dim);font-size:9px;text-transform:uppercase">Width</div><div>${st.width}</div></div>
+        <div><div style="color:var(--dim);font-size:9px;text-transform:uppercase">Current P&L</div><div style="color:${st.profit==null?'var(--dim)':st.profit>=0?'var(--green)':'var(--red)'};font-weight:700">${st.profit==null?'—':(st.profit>=0?'+':'')+inr(totalProfit)} ${st.profitPct==null?'':'('+(st.profitPct>=0?'+':'')+st.profitPct.toFixed(1)+'%)'}</div></div>
+      </div>
+
+      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:8px">
+        <label class="pos-field" style="flex:0 0 220px">
+          Current spread cost (₹/share)
+          <input type="number" step="0.05" value="${p.currentCost==null?'':p.currentCost}"
+                 placeholder="paste from Sensibull"
+                 onchange="updateCurrentCost('${p.id}', this.value)">
+        </label>
+        <a href="https://web.sensibull.com/option-chain?tradingsymbol=${p.symbol}" target="_blank" rel="noopener"
+           style="color:var(--cyan);font-size:10px;text-decoration:none;padding-bottom:8px">Open ${p.symbol} on Sensibull ↗</a>
+      </div>
+
+      ${bar}
+
+      <div style="display:flex;gap:10px;margin-top:10px;font-size:10px">
+        <span onclick="togglePositionClosed('${p.id}')" style="cursor:pointer;color:var(--dim)">${p.closed?'↺ reopen':'✓ mark closed'}</span>
+        <span onclick="deletePosition('${p.id}')" style="cursor:pointer;color:var(--red)">🗑 delete</span>
+      </div>
+    </div>`;
+  }).join('');
+  list.innerHTML = cards;
+  checkPositionAlerts();
 }
 
 async function runTfCompare(){
@@ -1542,6 +1861,11 @@ document.addEventListener('DOMContentLoaded', ()=>{
   renderAlerts();
   document.getElementById('code-main').innerHTML = pineCode;
   initBtChips();
+
+  // Position-count badge on the tab (and reset any stale alert state for closed/deleted positions)
+  const arr = loadPositions();
+  const b = document.getElementById('pos-count-badge');
+  if(b) b.textContent = arr.length ? arr.length : '';
 
   // Real live data from the local NSE proxy (server.py)
   refreshLive();

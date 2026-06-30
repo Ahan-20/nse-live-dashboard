@@ -510,6 +510,11 @@ try:
         FO_LIST = set(json.load(_f))
 except Exception:
     FO_LIST = set()
+try:
+    with open(os.path.join(HERE, "lot_sizes.json")) as _f:
+        LOT_SIZES = json.load(_f)        # {symbol: int}
+except Exception:
+    LOT_SIZES = {}
 
 
 _bullput_cache = {"t": 0.0, "data": None}
@@ -618,6 +623,7 @@ def build_bullput():
 
         rows.append({
             "symbol": sym, "chg": round(ch, 2), "ltp": round(ltp, 2),
+            "lot_size": LOT_SIZES.get(sym),
             "sector": rep_sector[0] if rep_sector else "—",
             "sector_chg": round(rep_sector[1], 2) if rep_sector else None,
             "fo_match": {"score": match_score, "filters": match_filters},
