@@ -1249,6 +1249,26 @@ function renderLeaderboard(d){
 // ─── BULL PUT SETUP ─────────────────────────────────────────────
 let _bpData = null, _bpTimer = null;
 
+// Per-symbol per-day checklist for the flowchart's manual steps 7-9.
+// Keys: mp (Max Pain ≥ CMP), delta (Sell PE Δ 0.20-0.30 identified),
+//       put (Put OI wall near sell strike), call (Call OI NOT stacked above CMP).
+function bpVerifyKey(sym){ return 'bp_verify_'+sym+'_'+new Date().toISOString().slice(0,10); }
+function bpToggleVerify(sym, field){
+  const k = bpVerifyKey(sym);
+  let st = {};
+  try { st = JSON.parse(localStorage.getItem(k)||'{}'); } catch(e){}
+  st[field] = !st[field];
+  localStorage.setItem(k, JSON.stringify(st));
+  renderBullPut(_bpData);          // re-render so badge updates
+}
+function bpVerifyState(sym){
+  try { return JSON.parse(localStorage.getItem(bpVerifyKey(sym))||'{}'); } catch(e){ return {}; }
+}
+function bpToggleChecklist(sym){
+  const row = document.getElementById('bp-check-'+sym);
+  if(row) row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
+}
+
 async function runBullPut(){
   const status = document.getElementById('bp-status');
   const out = document.getElementById('bp-results');
@@ -1263,6 +1283,33 @@ async function runBullPut(){
     status.style.color = 'var(--dim)';
     renderBullPut(d);
   }catch(e){ status.textContent = 'Error: '+e.message; status.style.color = 'var(--red)'; }
+}
+
+function vChecklistRow(r, vState){
+  // The row is hidden by default; the 📋 Verify button toggles it.
+  // Each checkbox mirrors one flowchart step; ticking all 4 upgrades the badge.
+  const box = (field, num, title, subtitle) => {
+    const on = !!vState[field];
+    return `<label style="display:flex;align-items:flex-start;gap:6px;cursor:pointer;padding:6px 8px;border:1px solid ${on?'rgba(0,255,157,.35)':'var(--border)'};border-radius:4px;background:${on?'rgba(0,255,157,.06)':'#0a1420'};flex:1 1 200px">
+      <input type="checkbox" ${on?'checked':''} onclick="event.stopPropagation();bpToggleVerify('${r.symbol}','${field}')" style="margin-top:2px">
+      <span style="font-size:10px;line-height:1.4;color:${on?'var(--green)':'#a0aec0'}">
+        <b>Step ${num}. ${title}</b><br>
+        <span style="color:var(--dim);font-size:9px">${subtitle}</span>
+      </span>
+    </label>`;
+  };
+  return `<tr id="bp-check-${r.symbol}" style="display:none;background:#08131e">
+    <td colspan="8" style="padding:8px 12px 12px 12px">
+      <div style="font-size:10px;color:var(--amber);margin-bottom:6px">📋 Manual verification for ${r.symbol} · check on Sensibull, tick each box once confirmed:</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${box('mp', 7, 'Max Pain ≥ CMP', 'Max Pain price should be AT or ABOVE current market price. Below = bearish drift, no-go.')}
+        ${box('delta', 8, 'Sell PE Δ = 0.20–0.30', 'Identify a PE strike whose Delta is in this range (out-of-the-money enough).')}
+        ${box('put', 9, 'Put OI wall near sell strike', 'Strong Put OI at/below sell strike = support the market makers defend.')}
+        ${box('call', 9, 'Call OI NOT stacked above CMP', 'Heavy Call OI overhead (like NESTLEIND 1450/1500) = resistance ceiling. Skip if present.')}
+      </div>
+      <div style="font-size:9px;color:var(--dim);margin-top:6px">Ticks reset each morning. Once all 4 are green, the row badge upgrades to ★ FULL PASS 9/9.</div>
+    </td>
+  </tr>`;
 }
 
 function renderBullPut(d){
@@ -1308,8 +1355,14 @@ function renderBullPut(d){
            &nbsp;<span style="color:${da.adx_trending?'var(--green)':'var(--amber)'}">ADX ${da.adx}</span>
          </td>`
       : `<td style="text-align:center;color:var(--dim);font-size:10px">no data</td>`;
+    // "Daily OK" = steps 1-5 automated; verifyState tracks manual steps 7-9 per row
+    const vKey = 'bp_verify_'+r.symbol+'_'+(new Date().toISOString().slice(0,10));
+    const vState = (()=>{ try { return JSON.parse(localStorage.getItem(vKey)||'{}'); } catch(e){ return {}; }})();
+    const vDone = ['mp','delta','put','call'].filter(k=>vState[k]).length;
     const verdict = r.passes_all
-      ? '<span style="background:rgba(0,255,157,.15);color:var(--green);border:1px solid rgba(0,255,157,.4);padding:1px 7px;border-radius:3px;font-weight:700;font-size:10px">✓ ALL PASS</span>'
+      ? (vDone === 4
+          ? '<span style="background:rgba(0,255,157,.22);color:var(--green);border:1px solid rgba(0,255,157,.55);padding:2px 8px;border-radius:3px;font-weight:700;font-size:10px">★ FULL PASS 9/9</span>'
+          : `<span style="background:rgba(0,229,255,.12);color:var(--cyan);border:1px solid rgba(0,229,255,.35);padding:1px 7px;border-radius:3px;font-weight:700;font-size:10px" title="Steps 1-5 pass. Steps 7-9 need manual check on Sensibull.">✓ DAILY OK · verify 7–9 (${vDone}/4)</span>`)
       : (da.ok && da.passes ? '<span style="color:var(--amber);font-size:10px">daily ✓ · market gated</span>'
                             : '<span style="color:var(--dim);font-size:10px">—</span>');
     const tint = r.passes_all ? 'background:rgba(0,255,157,.06)' : '';
@@ -1327,15 +1380,28 @@ function renderBullPut(d){
       <td style="text-align:center;white-space:nowrap">
         <a onclick="event.stopPropagation()" href="${r.links.sensibull}" target="_blank" rel="noopener" style="color:var(--cyan);font-size:10px;text-decoration:none;margin-right:6px" title="Verify Max Pain ≥ CMP, find Sell-PE Δ 0.20-0.30 strikes, check OI walls">Sensibull ↗</a>
         <a onclick="event.stopPropagation()" href="${r.links.nse_chain}" target="_blank" rel="noopener" style="color:var(--cyan);font-size:10px;text-decoration:none;margin-right:6px" title="NSE official option chain">NSE ↗</a>
+        <span onclick="event.stopPropagation();bpToggleChecklist('${r.symbol}')" style="color:var(--amber);font-size:10px;cursor:pointer;font-weight:700;margin-right:6px" title="Log Sensibull verification for steps 7-9">📋 Verify</span>
         <span onclick="event.stopPropagation();prefillFromBullPut('${r.symbol}', ${r.lot_size||'null'})" style="color:var(--purple);font-size:10px;cursor:pointer;font-weight:700" title="Pre-fill Positions form with this stock">📊 Log</span>
       </td>
-    </tr>`;
+    </tr>
+    ${vChecklistRow(r, vState)}`;
   }).join('') || `<tr><td colspan="8" style="text-align:center;color:var(--dim);padding:14px">${d.n_candidates===0?'No F&O gainers right now.':'No candidates pass all daily filters. Uncheck the filter to see partial matches.'}</td></tr>`;
 
+  // Prominent honest warning — "daily ok" ≠ "trade"
+  const manualWarn = `<div style="border:1px solid var(--amber);background:rgba(255,179,71,.06);color:#e2e8f0;
+      padding:10px 14px;border-radius:6px;font-size:11px;margin-bottom:10px;line-height:1.55">
+    <b style="color:var(--amber)">⚠ &nbsp; DAILY OK ≠ TRADE</b> &nbsp;
+    "✓ Daily OK" means steps 1–5 (bias · sector · F&O · trend) pass.
+    <b>You still MUST verify on Sensibull</b> before entry:
+    &nbsp;<span style="color:#a0aec0">(7) Max Pain ≥ CMP · (8) Sell PE Δ 0.20–0.30 · (9) Put OI wall near sell strike &amp; Call OI NOT stacked above CMP.</span>
+    <br><span style="color:var(--dim)">Example: a stock passing all 5 technicals can still fail if PCR &lt; 1 with heavy overhead Call OI —
+    that's a bearish OI structure and a NO for Bull Put Spreads.</span>
+  </div>`;
+
   document.getElementById('bp-results').innerHTML =
-    `${bias}${sec}
+    `${bias}${sec}${manualWarn}
      <div style="font-size:11px;color:#a0aec0;margin-bottom:8px">
-       <b style="color:var(--cyan)">${d.n_pass}/${d.n_candidates}</b> candidates pass all daily filters · auto-refresh 60s · click a row to backtest
+       <b style="color:var(--cyan)">${d.n_pass}/${d.n_candidates}</b> candidates pass daily filters · click 📋 on a row to log Sensibull checks · auto-refresh 60s · click a row to backtest
      </div>
      <div style="max-height:560px;overflow:auto;border:1px solid var(--border);border-radius:6px">
        <table class="matrix" style="width:100%">
