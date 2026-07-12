@@ -116,9 +116,124 @@ class GrowwProvider(IntradayProvider):
             return []
 
 
+# ── Kite Connect (Zerodha) implementation ────────────────────────────
+class KiteProvider(IntradayProvider):
+    """Kite Connect intraday candles.
+
+    Auth model:
+      - api_key + api_secret are static (from kite.trade dev console)
+      - access_token expires DAILY at ~06:00 IST
+      - Refreshed via /kite/login browser flow on the server (server.py handler)
+      - We read the current token from env each call, so a mid-run refresh works
+
+    Symbol model:
+      - Kite uses instrument_tokens (integers), not symbols
+      - We cache a symbol → token map from /instruments/NSE on first call
+    """
+    name = "kite"
+    BASE = "https://api.kite.trade"
+
+    def __init__(self, api_key):
+        self.api_key = api_key
+        self.enabled = bool(api_key)
+        self._tok_cache = None            # symbol -> instrument_token
+        self._tok_at = 0.0
+        self._candle_cache = {}           # (sym, tf, days) -> (t, bars)
+
+    def _headers(self):
+        access = os.environ.get("KITE_ACCESS_TOKEN", "")
+        return {
+            "X-Kite-Version": "3",
+            "Authorization": f"token {self.api_key}:{access}",
+            "User-Agent": "nse-live-dashboard",
+        }
+
+    def _get(self, path, timeout=15):
+        req = urllib.request.Request(self.BASE + path, headers=self._headers())
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8"))
+
+    def _instrument_token(self, symbol):
+        """Look up NSE:SYMBOL-EQ's instrument_token. Cached for 24h."""
+        if self._tok_cache and (time.time() - self._tok_at) < 24 * 3600:
+            return self._tok_cache.get(symbol)
+        # /instruments/NSE returns CSV — parse it once, cache
+        req = urllib.request.Request(self.BASE + "/instruments/NSE",
+                                     headers=self._headers())
+        with urllib.request.urlopen(req, timeout=30) as r:
+            text = r.read().decode("utf-8", "ignore")
+        toks = {}
+        lines = text.splitlines()
+        if not lines:
+            return None
+        # Kite CSV headers:
+        # instrument_token,exchange_token,tradingsymbol,name,last_price,expiry,strike,tick_size,lot_size,instrument_type,segment,exchange
+        for line in lines[1:]:
+            parts = line.split(",")
+            if len(parts) < 12:
+                continue
+            tsym, itype = parts[2].strip(), parts[9].strip()
+            if itype == "EQ" and tsym:
+                try:
+                    toks[tsym] = int(parts[0])
+                except ValueError:
+                    pass
+        self._tok_cache = toks
+        self._tok_at = time.time()
+        return toks.get(symbol)
+
+    # Kite interval labels differ from ours
+    _KITE_TF = {"15m": "15minute", "1h": "60minute"}
+
+    def get_candles(self, symbol, tf, days=30):
+        if tf not in self._KITE_TF:
+            return []
+        cache_key = (symbol, tf, days)
+        if cache_key in self._candle_cache:
+            t, bars = self._candle_cache[cache_key]
+            if time.time() - t < 300:                     # 5-min cache
+                return bars
+        token = self._instrument_token(symbol)
+        if not token:
+            return []
+        end = datetime.datetime.now()
+        start = end - datetime.timedelta(days=days)
+        qs = urllib.parse.urlencode({
+            "from": start.strftime("%Y-%m-%d %H:%M:%S"),
+            "to":   end.strftime("%Y-%m-%d %H:%M:%S"),
+        })
+        try:
+            d = self._get(f"/instruments/historical/{token}/{self._KITE_TF[tf]}?{qs}")
+        except Exception:
+            return []
+        raw = ((d.get("data") or {}).get("candles")) or []
+        bars = []
+        for c in raw:
+            # Kite: [ts_iso, open, high, low, close, volume, oi?]
+            ts = c[0]
+            if isinstance(ts, str):
+                # Trim TZ suffix so fromisoformat handles it uniformly
+                dt = ts.replace("T", " ")[:19]
+            else:
+                dt = str(ts)
+            try:
+                bars.append({
+                    "dt": dt,
+                    "o": float(c[1]), "h": float(c[2]),
+                    "l": float(c[3]), "c": float(c[4]),
+                    "v": float(c[5] if len(c) > 5 else 0),
+                })
+            except (ValueError, IndexError):
+                continue
+        self._candle_cache[cache_key] = (time.time(), bars)
+        return bars
+
+
 # ── Factory ──────────────────────────────────────────────────────────
 def make_provider():
     name = os.environ.get("INTRADAY_PROVIDER", "none").lower()
+    if name == "kite":
+        return KiteProvider(os.environ.get("KITE_API_KEY"))
     if name == "groww":
         return GrowwProvider(os.environ.get("GROWW_API_KEY"),
                              os.environ.get("GROWW_API_SECRET"))

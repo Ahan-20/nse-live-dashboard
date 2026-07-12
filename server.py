@@ -126,6 +126,58 @@ def nse_get(path):
         return json.loads(_opener.open(req, timeout=12).read().decode("utf-8"))
 
 
+# ── Kite Connect: request-token → access-token exchange ──────────────
+def _kite_exchange_request_token(request_token):
+    """POST to /session/token with a SHA-256 checksum. Returns access_token."""
+    import hashlib
+    api_key = os.environ.get("KITE_API_KEY", "")
+    api_secret = os.environ.get("KITE_API_SECRET", "")
+    if not api_key or not api_secret:
+        raise RuntimeError("KITE_API_KEY / KITE_API_SECRET must be set")
+    checksum = hashlib.sha256(
+        (api_key + request_token + api_secret).encode()).hexdigest()
+    body = urllib.parse.urlencode({
+        "api_key": api_key,
+        "request_token": request_token,
+        "checksum": checksum,
+    }).encode()
+    req = urllib.request.Request(
+        "https://api.kite.trade/session/token", data=body,
+        headers={"X-Kite-Version": "3",
+                 "Content-Type": "application/x-www-form-urlencoded"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        d = json.loads(r.read().decode("utf-8"))
+    tok = ((d.get("data") or {}).get("access_token")) or ""
+    if not tok:
+        raise RuntimeError(f"no access_token in response: {d}")
+    return tok
+
+
+def _persist_kite_access_token(token):
+    """Write the new access_token into /etc/nse-live-dashboard/env so the
+    service picks it up on restart. In-memory os.environ is also updated by
+    the caller. If the env file doesn't exist (e.g. running locally), skip."""
+    env_file = "/etc/nse-live-dashboard/env"
+    if not os.path.exists(env_file):
+        # Local dev: also try repo-root .env
+        alt = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+        env_file = alt if os.path.exists(alt) else None
+    if not env_file:
+        return
+    try:
+        with open(env_file) as f:
+            lines = f.readlines()
+    except PermissionError:
+        return                        # /etc/... is chmod 600, our uid can't read
+    kept = [l for l in lines if not l.startswith("KITE_ACCESS_TOKEN=")]
+    kept.append(f"KITE_ACCESS_TOKEN={token}\n")
+    try:
+        with open(env_file, "w") as f:
+            f.writelines(kept)
+    except PermissionError:
+        pass
+
+
 # ── BSE (SENSEX is a BSE index, not on NSE) ──────────────────────────
 _bse_jar = http.cookiejar.CookieJar()
 _bse_opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(_bse_jar))
@@ -926,6 +978,38 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 rep = {"ok": False, "error": str(e), "rows": []}
             return self._send(200, json.dumps(rep).encode("utf-8"), "application/json")
+        # Kite Connect daily-login browser flow.
+        # Visiting /kite/login redirects you to Zerodha's OAuth page. After
+        # you sign in there, Zerodha redirects back to /kite/callback with a
+        # request_token that we exchange for an access_token (valid ~24h).
+        if self.path.startswith("/kite/login"):
+            key = os.environ.get("KITE_API_KEY", "")
+            if not key:
+                return self._send(500, b"KITE_API_KEY not set", "text/plain")
+            url = f"https://kite.zerodha.com/connect/login?v=3&api_key={key}"
+            self.send_response(302)
+            self.send_header("Location", url); self.end_headers()
+            return
+        if self.path.startswith("/kite/callback"):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            rtok = (q.get("request_token", [""])[0] or "").strip()
+            status = (q.get("status", [""])[0] or "").strip()
+            if status != "success" or not rtok:
+                return self._send(400, b"Kite login failed", "text/plain")
+            try:
+                access = _kite_exchange_request_token(rtok)
+            except Exception as e:
+                return self._send(500, f"Kite exchange failed: {e}".encode(), "text/plain")
+            # Persist so the next server restart still has it.
+            _persist_kite_access_token(access)
+            os.environ["KITE_ACCESS_TOKEN"] = access
+            html = (b"<html><body style='font-family:sans-serif;background:#0d1b2a;color:#c9d1d9;padding:40px'>"
+                    b"<h2 style='color:#00ff9d'>&#10003; Kite connected</h2>"
+                    b"<p>Access token stored. You can close this tab.</p>"
+                    b"<p>Token expires at ~06:00 IST tomorrow \xe2\x80\x94 revisit "
+                    b"<a style='color:#00e5ff' href='/kite/login'>/kite/login</a> then.</p>"
+                    b"</body></html>")
+            return self._send(200, html, "text/html; charset=utf-8")
         if self.path.startswith("/api/tef-score"):
             try:
                 rep = cached_tef_score()
