@@ -712,6 +712,169 @@ def cached_backtest(symbol, q):
     return _bt_cache[key]
 
 
+# ── THETA EDGE FILTER (TEF-90) score ─────────────────────────────────
+# Auto-scored factors from historical + live data. Manual items (PCR, Max Pain,
+# IV, OI, event calendar) come from the UI checklist.
+_tef_cache = {"t": 0.0, "data": None}
+
+
+def build_tef_score():
+    """Auto-checkable side of TEF-90. Returns raw values so the UI can render
+    a per-factor checklist and let the user tick the manual items."""
+    # NIFTY 50 historicals via NIFTYBEES (1:1 ETF tracker) — we have 6y in DB.
+    bars = bt.load("NIFTYBEES")
+    if len(bars) < 220:
+        return {"ok": False, "error": "not enough NIFTY history"}
+    c = [b["c"] for b in bars]; h = [b["h"] for b in bars]; l = [b["l"] for b in bars]
+    o = [b["o"] for b in bars]
+    e200 = bt.ema(c, 200); e20 = bt.ema(c, 20)
+    a = bt.atr(h, l, c, 14)
+    rsiv = bt.rsi(c, 14)
+
+    # Live NIFTY 50 % change today (NIFTYBEES tracks NIFTY 1:1 in % terms, so
+    # we compute all indicators on NIFTYBEES bars and scale today's implied
+    # close from the live NIFTY %-change).
+    nifty_live = None; live_pchg = None
+    try:
+        d = nse_get("/api/allIndices")
+        row = next((r for r in d.get("data", []) if r.get("index") == "NIFTY 50"), None)
+        if row:
+            nifty_live = float(row.get("last"))
+            live_pchg = float(row.get("percentChange", 0))
+    except Exception:
+        pass
+    prev_c = c[-1]                                # last NIFTYBEES close from DB
+    # Today's implied NIFTYBEES close, scaled from live NIFTY 50's %-change:
+    cmp = prev_c * (1 + (live_pchg or 0) / 100)
+
+    # === TEF-90 factor computations ===
+    today = datetime.date.today()
+
+    # 1. Date filter — best window is 18-25 (post OI-build day 15)
+    dom = today.day
+    date_ok = dom >= 15
+    date_best = 18 <= dom <= 25
+
+    # 2. Sideways / Near 200 EMA: distance from 200 EMA in ATR units
+    dist_pct = (cmp - e200[-1]) / e200[-1] * 100 if e200[-1] else 0
+    near_ema = abs(dist_pct) < 3.0                # within ~3% = sideways-ish
+
+    # 3. No strong HH/HL or LH/LL: use 20-day range slope, ADX
+    adx = bt.adx(h, l, c, 14)[-1] if hasattr(bt, "adx") else _adx14(h, l, c)
+    # EMA slope (5-day)
+    slope20 = ((c[-1] - c[-6]) / c[-6] * 100) if len(c) >= 6 else 0
+    no_strong_trend = adx < 20 and abs(slope20) < 2.5
+
+    # 4. Range-bound: last 3 daily ranges as % of ATR
+    last_ranges = [(h[i] - l[i]) for i in range(-3, 0)]
+    avg_range = sum(last_ranges) / 3
+    range_bound = avg_range < 1.2 * a[-1]         # today's ATR bar
+
+    # 5. Small candles: median body / range over 5 sessions
+    def body_ratio(i):
+        rng = h[i] - l[i]
+        return (abs(c[i] - o[i]) / rng) if rng > 0 else 0
+    med_body = sorted(body_ratio(i) for i in range(-5, 0))[2]
+    small_candles = med_body < 0.55
+
+    # 6. No gap open: today's move vs prev close < 1%
+    #    (this doubles as one of the auto-skip red-flag checks)
+    gap_pct = abs(live_pchg) if live_pchg is not None else 0
+    no_gap = gap_pct < 1.0
+
+    # 7. RSI 40-60 (part of the sideways classifier)
+    rsi = rsiv[-1]
+    rsi_neutral = 40 <= rsi <= 60
+
+    # === Market classifier ===
+    if near_ema and no_strong_trend and rsi_neutral:
+        market_type = "sideways"
+    elif dist_pct > 3 and slope20 > 1 and adx > 20:
+        market_type = "trend_up"
+    elif dist_pct < -3 and slope20 < -1 and adx > 20:
+        market_type = "trend_down"
+    else:
+        market_type = "mixed"
+
+    # Auto-score tally (7 items we can compute; UI adds up to 3 more manually)
+    auto_score = sum([date_ok, near_ema, no_strong_trend, range_bound,
+                      small_candles, no_gap, rsi_neutral])
+    auto_bonus = 1 if date_best else 0            # small nudge for optimal window
+    auto_total = auto_score + auto_bonus
+
+    return {
+        "ok": True,
+        "as_of": today.isoformat(),
+        "nifty_live": round(nifty_live, 2) if nifty_live else None,
+        "cmp": round(cmp, 2),         # NIFTYBEES-scale (for internal math)
+        "prev_close": round(prev_c, 2),
+        "day_pchg": round(gap_pct, 2) if live_pchg is not None else None,
+        "ema200": round(e200[-1], 2),
+        "dist_from_ema_pct": round(dist_pct, 2),
+        "adx": round(adx, 1),
+        "slope_5d_pct": round(slope20, 2),
+        "atr": round(a[-1], 2),
+        "avg_range_3d": round(avg_range, 2),
+        "median_body_ratio_5d": round(med_body, 2),
+        "rsi": round(rsi, 1),
+        "market_type": market_type,
+        "auto_score": auto_total,
+        "auto_score_max": 8,               # 7 items + 1 bonus
+        "factors": [
+            {"id":"date",       "step":1, "auto":True,  "ok":date_ok,   "detail":f"day {dom}{' (best window)' if date_best else ''}"},
+            {"id":"near_ema",   "step":2, "auto":True,  "ok":near_ema,  "detail":f"NIFTY {'{:+.2f}'.format(dist_pct)}% from 200 EMA"},
+            {"id":"no_trend",   "step":3, "auto":True,  "ok":no_strong_trend, "detail":f"ADX {adx:.1f} · 5d slope {slope20:+.2f}%"},
+            {"id":"range_bound","step":4, "auto":True,  "ok":range_bound, "detail":f"avg 3-day range {avg_range:.2f} vs ATR {a[-1]:.2f}"},
+            {"id":"small_cndl", "step":5, "auto":True,  "ok":small_candles, "detail":f"median body/range {med_body:.2f} (5d)"},
+            {"id":"no_gap",     "step":6, "auto":True,  "ok":no_gap,    "detail":f"today gap {gap_pct:.2f}%"},
+            {"id":"rsi",        "step":7, "auto":True,  "ok":rsi_neutral, "detail":f"RSI {rsi:.1f}"},
+            # Manual items — the UI will render them as un-ticked toggles
+            {"id":"pcr",        "step":8, "auto":False, "ok":None, "detail":"Verify PCR is 0.9-1.2 on Sensibull"},
+            {"id":"maxpain",    "step":9, "auto":False, "ok":None, "detail":"Verify Max Pain within ±100 pts of CMP"},
+            {"id":"iv",         "step":10,"auto":False, "ok":None, "detail":"Verify IV Percentile > 50"},
+            {"id":"no_event",   "step":11,"auto":False, "ok":None, "detail":"Confirm no RBI/Fed/Budget/results in next 3 days"},
+            {"id":"oi_walls",   "step":12,"auto":False, "ok":None, "detail":"Both Put + Call OI walls near CMP (both sides supported)"},
+        ],
+    }
+
+
+def _adx14(h, l, c):
+    """Minimal ADX(14) so we don't crash if backtest.adx isn't exposed."""
+    n = 14
+    if len(c) < n + 2:
+        return 0
+    tr = [max(h[i] - l[i], abs(h[i] - c[i-1]), abs(l[i] - c[i-1])) for i in range(1, len(c))]
+    up = [max(0, h[i] - h[i-1]) for i in range(1, len(c))]
+    dn = [max(0, l[i-1] - l[i]) for i in range(1, len(c))]
+    pdm = [u if u > d else 0 for u, d in zip(up, dn)]
+    ndm = [d if d > u else 0 for u, d in zip(up, dn)]
+    def rma(xs):
+        v = sum(xs[:n]) / n
+        out = [v]
+        for x in xs[n:]:
+            v = (v * (n - 1) + x) / n; out.append(v)
+        return out
+    atrs = rma(tr); pdi = rma(pdm); ndi = rma(ndm)
+    dx = []
+    for a_, p_, n_ in zip(atrs, pdi, ndi):
+        s = p_ + n_
+        dx.append(100 * abs(p_ - n_) / s if s > 0 else 0)
+    if len(dx) < n: return 0
+    adx = sum(dx[:n]) / n
+    for x in dx[n:]:
+        adx = (adx * (n - 1) + x) / n
+    return adx
+
+
+def cached_tef_score():
+    now = time.time()
+    if _tef_cache["data"] and now - _tef_cache["t"] < 60:
+        return _tef_cache["data"]
+    d = build_tef_score()
+    _tef_cache["data"], _tef_cache["t"] = d, now
+    return d
+
+
 # ── HTTP server ──────────────────────────────────────────────────────
 class Handler(BaseHTTPRequestHandler):
     def _send(self, code, body, ctype):
@@ -762,6 +925,12 @@ class Handler(BaseHTTPRequestHandler):
                 rep = cached_bullput()
             except Exception as e:
                 rep = {"ok": False, "error": str(e), "rows": []}
+            return self._send(200, json.dumps(rep).encode("utf-8"), "application/json")
+        if self.path.startswith("/api/tef-score"):
+            try:
+                rep = cached_tef_score()
+            except Exception as e:
+                rep = {"ok": False, "error": str(e)}
             return self._send(200, json.dumps(rep).encode("utf-8"), "application/json")
         if self.path.startswith("/api/tradefinder"):
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)

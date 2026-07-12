@@ -352,6 +352,7 @@
     <div class="tab" onclick="showTab('backtest',this)" style="color:var(--gold)">🔬 Backtest (5Y)</div>
     <div class="tab" onclick="showTab('finder',this)" style="color:var(--green)">🎯 Trade Finder</div>
     <div class="tab" onclick="showTab('bullput',this)" style="color:var(--cyan)">📈 Bull Put Setup</div>
+    <div class="tab" onclick="showTab('tef',this)" style="color:var(--amber)">⚡ TEF-90 Score</div>
     <div class="tab" onclick="showTab('positions',this)" style="color:var(--purple)">📊 Positions <span id="pos-count-badge" style="background:#1a2744;color:var(--purple);font-size:9px;padding:1px 6px;border-radius:8px;margin-left:4px"></span></div>
   </div>
 
@@ -615,6 +616,20 @@
     <div id="bp-results"></div>
   </div>
 
+  <!-- TAB: TEF-90 SCORE (Theta Edge Filter) -->
+  <div id="tab-tef" class="code-block" style="display:none;padding:16px">
+    <div style="margin-bottom:12px">
+      <div style="color:var(--amber);font-size:12px;font-weight:700;letter-spacing:1px">⚡ THETA EDGE FILTER — TEF-90 · DAILY MARKET SCORE</div>
+      <div style="color:var(--dim);font-size:10px;margin-top:3px;max-width:840px;line-height:1.55">
+        Abhishek's TEF-90 pre-trade gate. Auto-scores the technical factors from live NIFTY + our historical DB;
+        you tick the option-data items (PCR, Max Pain, IV, OI walls, event calendar) after checking Sensibull.
+        <b>Score ≥ 8 = trade the recommended strategy · ≤ 5 = SKIP TODAY.</b>
+        The core rule: you make money by <b>skipping bad days</b>.
+      </div>
+    </div>
+    <div id="tef-content"><div style="color:var(--dim);font-size:11px">Loading market state…</div></div>
+  </div>
+
   <!-- TAB: POSITIONS -->
   <div id="tab-positions" class="code-block" style="display:none;padding:16px">
     <div style="margin-bottom:12px">
@@ -629,17 +644,23 @@
 
     <!-- Add-position form -->
     <details id="pos-form-wrap" style="margin-bottom:12px;background:#0a1420;border:1px solid var(--border);border-radius:6px">
-      <summary style="cursor:pointer;padding:10px 14px;color:var(--purple);font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase">+ Add a Bull Put Spread position</summary>
-      <div style="padding:0 14px 14px 14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px">
-        <label class="pos-field">Stock<input id="pos-symbol" placeholder="e.g. RELIANCE" style="text-transform:uppercase"></label>
-        <label class="pos-field">Expiry<input id="pos-expiry" type="date"></label>
-        <label class="pos-field">Sell PE strike<input id="pos-sell" type="number" step="0.05" placeholder="e.g. 1400"></label>
-        <label class="pos-field">Buy PE strike (hedge)<input id="pos-buy" type="number" step="0.05" placeholder="e.g. 1380"></label>
-        <label class="pos-field">Net credit received (₹/share)<input id="pos-credit" type="number" step="0.05" placeholder="e.g. 8.50"></label>
-        <label class="pos-field">Lots<input id="pos-lots" type="number" step="1" value="1" min="1"></label>
-        <label class="pos-field">Lot size (auto-fills)<input id="pos-lotsize" type="number" step="1" placeholder="e.g. 500"></label>
-        <label class="pos-field">Entry date<input id="pos-entry" type="date"></label>
-        <div style="grid-column:1/-1;display:flex;gap:10px;align-items:center;margin-top:4px">
+      <summary style="cursor:pointer;padding:10px 14px;color:var(--purple);font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase">+ Add a position</summary>
+      <div style="padding:0 14px 14px 14px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px">
+          <label class="pos-field">Strategy<select id="pos-strategy" onchange="posStrategyChanged()" style="background:#050a10;border:1px solid var(--border);color:#e2e8f0;padding:6px 8px;border-radius:4px;font-family:inherit;font-size:12px">
+            <option value="bps">📈 Bull Put Spread (2 legs)</option>
+            <option value="bcs">📉 Bear Call Spread (2 legs)</option>
+            <option value="ss">🎯 Short Strangle (2 legs, undefined risk)</option>
+            <option value="ic">🦅 Iron Condor (4 legs)</option>
+          </select></label>
+          <label class="pos-field">Stock<input id="pos-symbol" placeholder="e.g. RELIANCE" style="text-transform:uppercase"></label>
+          <label class="pos-field">Expiry<input id="pos-expiry" type="date"></label>
+          <label class="pos-field">Lots<input id="pos-lots" type="number" step="1" value="1" min="1"></label>
+          <label class="pos-field">Lot size (auto-fills)<input id="pos-lotsize" type="number" step="1" placeholder="e.g. 500"></label>
+          <label class="pos-field">Entry date<input id="pos-entry" type="date"></label>
+        </div>
+        <div id="pos-legs" style="margin-top:12px"></div>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:12px">
           <button onclick="savePosition()" style="background:var(--purple);color:#050a10;border:none;padding:8px 18px;border-radius:5px;font-weight:700;cursor:pointer;font-family:inherit;font-size:12px;letter-spacing:.5px">SAVE POSITION</button>
           <button onclick="clearPositionForm()" style="background:transparent;border:1px solid var(--border);color:var(--dim);padding:8px 14px;border-radius:5px;cursor:pointer;font-family:inherit;font-size:11px">Reset</button>
           <span id="pos-form-status" style="font-size:11px;color:var(--dim)"></span>
@@ -1054,7 +1075,7 @@ const pineCode = `<span class="c-comment">// ═══════════�
 function showTab(name, el){
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
-  ['main','setup','alerts','workflow','backtest','finder','bullput','positions'].forEach(id=>{
+  ['main','setup','alerts','workflow','backtest','finder','bullput','tef','positions'].forEach(id=>{
     const el2 = document.getElementById('tab-'+id);
     if(el2) el2.style.display = id===name ? 'block' : 'none';
   });
@@ -1073,6 +1094,13 @@ function showTab(name, el){
     }, 60000);
   }
   if(name==='positions') renderPositions();
+  if(name==='tef'){
+    if(!_tefData) runTefScore();
+    if(!_tefTimer) _tefTimer = setInterval(()=>{
+      const t = document.getElementById('tab-tef');
+      if(t && t.style.display!=='none') runTefScore();
+    }, 60000);
+  }
 }
 
 // ─── TRADE FINDER ─────────────────────────────────────────────────
@@ -1423,13 +1451,204 @@ function renderBullPut(d){
      </div>`;
 }
 
-// ─── POSITION TRACKER (Bull Put Spread) ─────────────────────────────
+// ─── TEF-90 THETA EDGE FILTER ───────────────────────────────────────
+let _tefData = null, _tefTimer = null;
+
+// Manual factor ticks live in localStorage per day; reset each morning.
+function tefManualKey(){ return 'tef_manual_'+new Date().toISOString().slice(0,10); }
+function tefManualState(){
+  try { return JSON.parse(localStorage.getItem(tefManualKey())||'{}'); } catch(e){ return {}; }
+}
+function tefToggleManual(id){
+  const st = tefManualState();
+  st[id] = !st[id];
+  localStorage.setItem(tefManualKey(), JSON.stringify(st));
+  renderTefScore(_tefData);
+}
+
+async function runTefScore(){
+  try{
+    const r = await fetch('/api/tef-score', {cache:'no-store'});
+    const d = await r.json();
+    if(!d.ok){ document.getElementById('tef-content').innerHTML = `<div style="color:var(--red)">${d.error||'Failed'}</div>`; return; }
+    renderTefScore(d);
+  }catch(e){
+    document.getElementById('tef-content').innerHTML = `<div style="color:var(--red)">Error: ${e.message}</div>`;
+  }
+}
+
+// Strategy router — mirrors the TEF-90 decision table.
+// Manual factors are optimistic ticks: if user hasn't ticked, we treat them as
+// FAIL (safer default — encourages verifying before trading).
+function tefRoute(d, manual){
+  const total = d.auto_score + Object.values(manual).filter(Boolean).length;
+  const totalMax = d.auto_score_max + d.factors.filter(f=>!f.auto).length;
+  const mkt = d.market_type;
+  // Auto-skip red flags override everything
+  const gapOpen = (d.day_pchg||0) >= 1.0;
+  const rsiExtreme = d.rsi < 30 || d.rsi > 70;
+  let strategy, size='full', reason='';
+  if(gapOpen){ strategy='SKIP'; reason='Gap open ≥ 1% — auto-skip (theta strategies die on range expansion)'; }
+  else if(rsiExtreme){ strategy='SKIP'; reason=`RSI ${d.rsi} — extreme (outside 40-60 sideways range)`; }
+  else if(total >= 8 && mkt === 'sideways'){ strategy='SHORT_STRANGLE'; reason='Score ≥ 8 + sideways market'; }
+  else if(total >= 6 && (mkt === 'sideways' || mkt === 'mixed')){ strategy='IRON_CONDOR'; size='half'; reason='Score 6-7 (or mixed market) — Iron Condor with reduced size'; }
+  else if(mkt === 'trend_up'){ strategy='BULL_PUT_SPREAD'; reason='Trending up — directional theta'; }
+  else if(mkt === 'trend_down'){ strategy='BEAR_CALL_SPREAD'; reason='Trending down — directional theta'; }
+  else if(total <= 5){ strategy='SKIP'; reason=`Score ${total}/${totalMax} — probability too low, skip today`; }
+  else { strategy='SKIP'; reason='No high-conviction setup — wait for a better day'; }
+  return {strategy, size, reason, total, totalMax};
+}
+
+function renderTefScore(d){
+  if(!d) return;
+  _tefData = d;
+  const manual = tefManualState();
+  const route = tefRoute(d, manual);
+
+  const strategyMeta = {
+    'SHORT_STRANGLE': {color:'var(--green)', emoji:'🎯', label:'SHORT STRANGLE', hint:'Sell OTM CE + Sell OTM PE (both Δ 0.15-0.20). Undefined risk — position size accordingly.'},
+    'IRON_CONDOR':    {color:'var(--cyan)',  emoji:'🦅', label:'IRON CONDOR',   hint:'Sell OTM CE + Buy further OTM CE + Sell OTM PE + Buy further OTM PE. Defined risk.'},
+    'BULL_PUT_SPREAD':{color:'var(--green)', emoji:'📈', label:'BULL PUT SPREAD', hint:'Directional-bullish. Use the Bull Put Setup tab to pick a candidate stock.'},
+    'BEAR_CALL_SPREAD':{color:'var(--red)',  emoji:'📉', label:'BEAR CALL SPREAD', hint:'Directional-bearish. Mirror of Bull Put — sell OTM CE + buy hedge CE.'},
+    'SKIP':           {color:'var(--amber)', emoji:'⛔', label:'SKIP TODAY',    hint:'No trade. Real edge is skipping bad days.'},
+  }[route.strategy];
+
+  // Market-type badge colours
+  const mktMeta = {
+    'sideways':   {color:'var(--green)', label:'SIDEWAYS'},
+    'trend_up':   {color:'var(--cyan)',  label:'TRENDING UP'},
+    'trend_down': {color:'var(--red)',   label:'TRENDING DOWN'},
+    'mixed':      {color:'var(--amber)', label:'MIXED'},
+  }[d.market_type];
+
+  // Big score gauge at top
+  const scorePct = (route.total / route.totalMax) * 100;
+  const scoreCol = route.total >= 8 ? 'var(--green)' : route.total >= 6 ? 'var(--cyan)' : route.total >= 4 ? 'var(--amber)' : 'var(--red)';
+  const header = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+      <div style="border:2px solid ${scoreCol};background:#0a1420;border-radius:8px;padding:14px;text-align:center">
+        <div style="font-size:9px;color:var(--dim);letter-spacing:1px;text-transform:uppercase">TEF-90 Score (auto + manual)</div>
+        <div style="font-size:32px;font-weight:700;color:${scoreCol};line-height:1.1;margin-top:4px">${route.total}<span style="font-size:14px;color:var(--dim);font-weight:400"> / ${route.totalMax}</span></div>
+        <div style="height:6px;background:#1a2744;border-radius:3px;margin-top:8px;overflow:hidden"><div style="height:100%;width:${scorePct}%;background:${scoreCol}"></div></div>
+        <div style="font-size:9px;color:var(--dim);margin-top:6px">auto ${d.auto_score}/${d.auto_score_max} · manual ${Object.values(manual).filter(Boolean).length}/${d.factors.filter(f=>!f.auto).length}</div>
+      </div>
+      <div style="border:2px solid ${strategyMeta.color};background:#0a1420;border-radius:8px;padding:14px">
+        <div style="font-size:9px;color:var(--dim);letter-spacing:1px;text-transform:uppercase">Recommended Strategy</div>
+        <div style="font-size:20px;font-weight:700;color:${strategyMeta.color};margin-top:4px">${strategyMeta.emoji} ${strategyMeta.label}${route.size==='half'?' <span style="font-size:11px;color:var(--amber)">(HALF SIZE)</span>':''}</div>
+        <div style="font-size:10px;color:#a0aec0;margin-top:6px;line-height:1.4">${strategyMeta.hint}</div>
+        <div style="font-size:9px;color:var(--dim);margin-top:6px">${route.reason}</div>
+      </div>
+    </div>`;
+
+  // Market state snapshot
+  const stateRow = `<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px;padding:10px 12px;background:#0a1420;border:1px solid var(--border);border-radius:6px;font-size:11px">
+    <div><span style="color:var(--dim)">Market:</span> <b style="color:${mktMeta.color}">${mktMeta.label}</b></div>
+    <div><span style="color:var(--dim)">NIFTY 50:</span> <b>${d.nifty_live?.toLocaleString('en-IN') || '—'}</b> <span style="color:${(d.day_pchg||0)>=0?'var(--green)':'var(--red)'}">${d.day_pchg!=null?(d.day_pchg>=0?'+':'')+d.day_pchg+'%':''}</span></div>
+    <div><span style="color:var(--dim)">Dist from 200 EMA:</span> <b style="color:${Math.abs(d.dist_from_ema_pct)<3?'var(--green)':'var(--amber)'}">${d.dist_from_ema_pct>=0?'+':''}${d.dist_from_ema_pct}%</b></div>
+    <div><span style="color:var(--dim)">ADX:</span> <b style="color:${d.adx<20?'var(--green)':'var(--amber)'}">${d.adx}</b></div>
+    <div><span style="color:var(--dim)">RSI:</span> <b style="color:${d.rsi>=40&&d.rsi<=60?'var(--green)':'var(--amber)'}">${d.rsi}</b></div>
+    <div><span style="color:var(--dim)">5-day slope:</span> <b>${d.slope_5d_pct>=0?'+':''}${d.slope_5d_pct}%</b></div>
+  </div>`;
+
+  // Factor checklist
+  const factorRow = (f) => {
+    const isManual = !f.auto;
+    const ticked = isManual ? !!manual[f.id] : !!f.ok;
+    const okColor = ticked ? 'var(--green)' : 'var(--red)';
+    const bgColor = ticked ? 'rgba(0,255,157,.06)' : (isManual ? '#0a1420' : 'rgba(255,68,102,.04)');
+    const clickable = isManual;
+    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid ${ticked?'rgba(0,255,157,.35)':'var(--border)'};background:${bgColor};border-radius:5px;${clickable?'cursor:pointer':''}" ${clickable?`onclick="tefToggleManual('${f.id}')"`:''}>
+      <div style="width:22px;height:22px;border:1px solid ${okColor};border-radius:4px;display:flex;align-items:center;justify-content:center;color:${okColor};font-weight:700;font-size:12px;flex-shrink:0">${ticked?'✓':(isManual?'':'✗')}</div>
+      <div style="flex:1">
+        <div style="font-size:11px;color:#e2e8f0;font-weight:${ticked?'700':'400'}">Step ${f.step}. ${
+          {date:'Date filter (after 15th)',
+           near_ema:'Nifty near 200 EMA (sideways)',
+           no_trend:'No strong HH/HL or LH/LL trend',
+           range_bound:'Range-bound (last 2-3 days)',
+           small_cndl:'Small candles / consolidation',
+           no_gap:'No gap open >1%',
+           rsi:'RSI 40-60 (neutral)',
+           pcr:'PCR between 0.9-1.2',
+           maxpain:'Max Pain near CMP (±100)',
+           iv:'IV Percentile > 50',
+           no_event:'No major event in next 3 days',
+           oi_walls:'Strong Put + Call OI on both sides'}[f.id] || f.id}</div>
+        <div style="font-size:9px;color:var(--dim);margin-top:2px">${f.detail}${clickable?' · <span style="color:var(--amber)">click to tick after Sensibull check</span>':''}</div>
+      </div>
+      <div style="font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px">${isManual?'manual':'auto'}</div>
+    </div>`;
+  };
+  const factorList = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:14px">
+    ${d.factors.map(factorRow).join('')}
+  </div>`;
+
+  // Decision-table quick-ref
+  const decisionTable = `<div style="border:1px solid var(--border);border-radius:6px;padding:12px;background:#0a1420">
+    <div style="font-size:10px;color:var(--dim);letter-spacing:.5px;text-transform:uppercase;margin-bottom:8px">TEF-90 Decision Table</div>
+    <table class="matrix" style="width:100%;font-size:11px">
+      <thead><tr><th>Score</th><th>Market</th><th>Action</th></tr></thead>
+      <tbody>
+        <tr style="${route.strategy==='SHORT_STRANGLE'?'background:rgba(0,255,157,.08)':''}"><td>8-10</td><td>Sideways</td><td style="color:var(--green);font-weight:700">Short Strangle · full size</td></tr>
+        <tr style="${route.strategy==='IRON_CONDOR'?'background:rgba(0,229,255,.08)':''}"><td>6-7</td><td>Sideways / Mixed</td><td style="color:var(--cyan);font-weight:700">Iron Condor · half size</td></tr>
+        <tr style="${route.strategy==='BULL_PUT_SPREAD'?'background:rgba(0,255,157,.08)':''}"><td>Any</td><td>Trending Up</td><td style="color:var(--green);font-weight:700">Bull Put Spread</td></tr>
+        <tr style="${route.strategy==='BEAR_CALL_SPREAD'?'background:rgba(255,68,102,.08)':''}"><td>Any</td><td>Trending Down</td><td style="color:var(--red);font-weight:700">Bear Call Spread</td></tr>
+        <tr style="${route.strategy==='SKIP'?'background:rgba(255,179,71,.08)':''}"><td>≤ 5</td><td>Any</td><td style="color:var(--amber);font-weight:700">SKIP · sit today out</td></tr>
+      </tbody></table>
+  </div>`;
+
+  document.getElementById('tef-content').innerHTML = header + stateRow + factorList + decisionTable +
+    `<div style="font-size:10px;color:var(--dim);margin-top:10px;line-height:1.5">
+      <b style="color:var(--amber)">Auto-skip overrides:</b> gap open ≥ 1% OR RSI &lt; 30 / &gt; 70 → force SKIP regardless of score.
+      Manual ticks reset each morning · auto-refresh 60s ·
+      NIFTY historicals computed on NIFTYBEES (tracks NIFTY 50 1:1 in %).
+    </div>`;
+}
+
+// ─── POSITION TRACKER (multi-strategy) ──────────────────────────────
 // Stored client-side in localStorage so positions survive reloads. No server.
-const POS_KEY = 'bullput_positions_v1';
-const ALERT_KEY = 'bullput_alerts_seen_v1';   // {posId: lastBadge}  prevents re-alert spam
+// Storage schema: each position has a `strategy` code and a `legs` array;
+// legacy Bull-Put-only positions (no `strategy`) auto-migrate on load.
+const POS_KEY = 'bullput_positions_v1';           // kept for backward compat
+const ALERT_KEY = 'bullput_alerts_seen_v1';
+
+// Strategy definitions — display, leg schema, and default profit-target %
+// Every strategy uses the SAME state machine: sold for `credit`, buy back for
+// `currentCost`, target thresholds at 50% and 70% of credit.
+const STRATEGIES = {
+  bps: {label:'📈 Bull Put Spread', color:'var(--green)', defined:true,
+        legs:[{id:'sell', side:'sell', opt:'PE', label:'Sell PE strike'},
+              {id:'buy',  side:'buy',  opt:'PE', label:'Buy PE strike (hedge)'}]},
+  bcs: {label:'📉 Bear Call Spread', color:'var(--red)', defined:true,
+        legs:[{id:'sell', side:'sell', opt:'CE', label:'Sell CE strike'},
+              {id:'buy',  side:'buy',  opt:'CE', label:'Buy CE strike (hedge)'}]},
+  ss:  {label:'🎯 Short Strangle', color:'var(--amber)', defined:false,
+        legs:[{id:'sellce', side:'sell', opt:'CE', label:'Sell CE strike'},
+              {id:'sellpe', side:'sell', opt:'PE', label:'Sell PE strike'}]},
+  ic:  {label:'🦅 Iron Condor', color:'var(--cyan)', defined:true,
+        legs:[{id:'sellce', side:'sell', opt:'CE', label:'Sell CE strike (upper short)'},
+              {id:'buyce',  side:'buy',  opt:'CE', label:'Buy CE strike (upper hedge)'},
+              {id:'sellpe', side:'sell', opt:'PE', label:'Sell PE strike (lower short)'},
+              {id:'buype',  side:'buy',  opt:'PE', label:'Buy PE strike (lower hedge)'}]},
+};
 
 function loadPositions(){
-  try { return JSON.parse(localStorage.getItem(POS_KEY) || '[]'); } catch(e){ return []; }
+  let arr;
+  try { arr = JSON.parse(localStorage.getItem(POS_KEY) || '[]'); } catch(e){ return []; }
+  // Migrate legacy Bull-Put-only positions (had sell/buy/credit at top level).
+  let migrated = false;
+  for(const p of arr){
+    if(!p.strategy){
+      p.strategy = 'bps';
+      p.legs = [
+        {id:'sell', strike:p.sell},
+        {id:'buy',  strike:p.buy},
+      ];
+      migrated = true;
+    }
+    if(!p.legs){ p.legs = []; }
+  }
+  if(migrated) savePositionsArr(arr);
+  return arr;
 }
 function savePositionsArr(arr){
   localStorage.setItem(POS_KEY, JSON.stringify(arr));
@@ -1446,44 +1665,86 @@ function saveAlertsSeen(o){ localStorage.setItem(ALERT_KEY, JSON.stringify(o)); 
 function prefillFromBullPut(sym, lotSize){
   showTab('positions', [...document.querySelectorAll('.tab')].find(t=>t.textContent.includes('Positions')));
   document.getElementById('pos-form-wrap').open = true;
+  document.getElementById('pos-strategy').value = 'bps';
+  posStrategyChanged();
   document.getElementById('pos-symbol').value = sym;
   if(lotSize) document.getElementById('pos-lotsize').value = lotSize;
   document.getElementById('pos-entry').value = new Date().toISOString().slice(0,10);
   document.getElementById('pos-symbol').focus();
 }
 
+// Render leg inputs when the strategy dropdown changes.
+function posStrategyChanged(){
+  const strat = document.getElementById('pos-strategy').value;
+  const def = STRATEGIES[strat];
+  const box = document.getElementById('pos-legs');
+  const legInputs = def.legs.map(l => `
+    <label class="pos-field">${l.label}
+      <input id="pos-leg-${l.id}" type="number" step="0.05" placeholder="strike">
+    </label>`).join('');
+  box.innerHTML = `
+    <div style="font-size:9px;color:var(--dim);letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px">${def.label} · legs</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px">
+      ${legInputs}
+      <label class="pos-field">Net credit received (₹/share)
+        <input id="pos-credit" type="number" step="0.05" placeholder="total credit">
+      </label>
+    </div>
+    <div style="font-size:9px;color:var(--dim);margin-top:6px">${
+      def.defined ? 'Defined-risk: max loss = width − credit (per share).' :
+      '⚠ Undefined risk. SL rule: exit if EITHER short leg premium DOUBLES from entry.'
+    }</div>`;
+}
+
 function savePosition(){
   const g = id => document.getElementById(id);
+  const strat = g('pos-strategy').value;
+  const def = STRATEGIES[strat];
   const symbol = (g('pos-symbol').value||'').trim().toUpperCase();
-  const sell = parseFloat(g('pos-sell').value);
-  const buy = parseFloat(g('pos-buy').value);
-  const credit = parseFloat(g('pos-credit').value);
+  const credit = parseFloat(g('pos-credit')?.value);
   const lots = parseInt(g('pos-lots').value) || 1;
   const lotSize = parseInt(g('pos-lotsize').value);
   const expiry = g('pos-expiry').value;
   const entry = g('pos-entry').value || new Date().toISOString().slice(0,10);
   const status = g('pos-form-status');
-  if(!symbol || !sell || !buy || !credit || !lotSize){
-    status.textContent = 'Fill stock, strikes, net credit and lot size.';
+  const legs = def.legs.map(l => ({id:l.id, strike: parseFloat(g('pos-leg-'+l.id)?.value)}));
+
+  if(!symbol || !credit || !lotSize || legs.some(l => isNaN(l.strike))){
+    status.textContent = 'Fill stock, every leg strike, net credit and lot size.';
     status.style.color = 'var(--red)';
     return;
   }
-  if(sell <= buy){
-    status.textContent = 'For a Bull Put: sell strike must be HIGHER than buy (hedge) strike.';
-    status.style.color = 'var(--red)';
-    return;
+  // Strategy-specific structural checks
+  const strikeOf = id => legs.find(l => l.id === id)?.strike;
+  const errors = [];
+  if(strat === 'bps' && strikeOf('sell') <= strikeOf('buy')) errors.push('Bull Put: sell PE must be HIGHER than buy PE.');
+  if(strat === 'bcs' && strikeOf('sell') >= strikeOf('buy')) errors.push('Bear Call: sell CE must be LOWER than buy CE.');
+  if(strat === 'ss'  && strikeOf('sellce') <= strikeOf('sellpe')) errors.push('Short Strangle: sell CE strike must be ABOVE sell PE strike.');
+  if(strat === 'ic'){
+    if(strikeOf('sellce') >= strikeOf('buyce')) errors.push('Iron Condor: upper short CE must be BELOW upper hedge CE.');
+    if(strikeOf('sellpe') <= strikeOf('buype')) errors.push('Iron Condor: lower short PE must be ABOVE lower hedge PE.');
+    if(strikeOf('sellce') <= strikeOf('sellpe')) errors.push('Iron Condor: short CE strike must be ABOVE short PE strike.');
   }
-  const width = sell - buy;
-  if(credit >= width){
-    status.textContent = `Credit ${credit} ≥ spread width ${width}. Double-check the inputs.`;
-    status.style.color = 'var(--amber)';
-    return;
+  if(errors.length){ status.textContent = errors[0]; status.style.color = 'var(--red)'; return; }
+
+  // For defined-risk spreads, ensure credit < width (else warn)
+  if(def.defined){
+    let width;
+    if(strat === 'bps') width = strikeOf('sell') - strikeOf('buy');
+    else if(strat === 'bcs') width = strikeOf('buy') - strikeOf('sell');
+    else if(strat === 'ic') width = Math.max(strikeOf('buyce')-strikeOf('sellce'), strikeOf('sellpe')-strikeOf('buype'));
+    if(width > 0 && credit >= width){
+      status.textContent = `Credit ${credit} ≥ spread width ${width}. Double-check.`;
+      status.style.color = 'var(--amber)';
+      return;
+    }
   }
+
   const arr = loadPositions();
   arr.push({
     id: Date.now() + '_' + Math.random().toString(36).slice(2,7),
-    symbol, sell, buy, credit, lots, lotSize, expiry, entry,
-    currentCost: null,                 // user fills in later to check P&L
+    strategy: strat, symbol, legs, credit, lots, lotSize, expiry, entry,
+    currentCost: null,
     closed: false,
   });
   savePositionsArr(arr);
@@ -1494,9 +1755,8 @@ function savePosition(){
 }
 
 function clearPositionForm(){
-  ['pos-symbol','pos-sell','pos-buy','pos-credit','pos-expiry','pos-entry'].forEach(id=>{
-    const el = document.getElementById(id); if(el) el.value = '';
-  });
+  ['pos-symbol','pos-expiry','pos-entry'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+  document.querySelectorAll('#pos-legs input').forEach(el => el.value = '');
   document.getElementById('pos-lots').value = 1;
   document.getElementById('pos-lotsize').value = '';
 }
@@ -1521,29 +1781,33 @@ function togglePositionClosed(posId){
 }
 
 // Status engine: maps current spread cost → state badge.
-//
-// For a Bull Put SOLD at `credit`:
-//   profit/contract  = credit - currentCost
-//   profit % of max  = (credit - currentCost) / credit         // max = credit
-//   SL hit when      = currentCost >= width  (spread can't lose more than its width minus credit)
+// All theta strategies (BPS/BCS/Iron Condor/Short Strangle) share the same
+// math: sold for `credit`, profit = credit − currentCost, targets at 50%/70%.
+// The SL trigger differs by strategy — defined-risk spreads = width, Short
+// Strangle = credit × 2 (Abhishek's "exit if one side premium doubles" ≈ total
+// close-out cost doubling from the credit received).
 function positionState(p){
-  const width = p.sell - p.buy;
+  const def = STRATEGIES[p.strategy] || STRATEGIES.bps;
+  const strikeOf = id => p.legs.find(l => l.id === id)?.strike;
+  let width = null;
+  if(p.strategy === 'bps') width = strikeOf('sell') - strikeOf('buy');
+  else if(p.strategy === 'bcs') width = strikeOf('buy') - strikeOf('sell');
+  else if(p.strategy === 'ic') width = Math.max(strikeOf('buyce')-strikeOf('sellce'), strikeOf('sellpe')-strikeOf('buype'));
+  // Short Strangle: undefined risk, SL is when close-out cost = 2 × credit.
+  const slCost = def.defined ? width : (p.credit * 2);
   const max_profit_per = p.credit;
-  const max_loss_per = width - p.credit;
-  // Targets in currentCost terms:
-  const t50 = p.credit * 0.5;          // 50% profit  -> spread should cost half the credit
-  const t70 = p.credit * 0.3;          // 70% profit  -> spread should cost 30% of the credit
-  const slCost = width;                 // SL at width = max loss
+  const max_loss_per = def.defined ? (width - p.credit) : null;
+  const t50 = p.credit * 0.5;
+  const t70 = p.credit * 0.3;
   const out = {
     width, max_profit_per, max_loss_per,
     target50_cost: t50, target70_cost: t70, sl_cost: slCost,
+    defined: def.defined,
     badge: null, profitPct: null, profit: null, lockedSL: null,
   };
   if(p.currentCost == null) { out.badge = 'OPEN'; return out; }
   out.profit = (p.credit - p.currentCost);
   out.profitPct = (out.profit / p.credit) * 100;
-  // 50% locked-SL: once 70% hit, treat 50% (cost = t50) as the trailing stop.
-  // Flowchart: "At 70% Profit: Apply strict SL, Let remaining run for decay".
   if(p.currentCost <= t70) {
     out.badge = '70_LOCK';
     out.lockedSL = t50;
@@ -1592,10 +1856,18 @@ function checkPositionAlerts(){
 function showPositionAlert(p, st){
   const banner = document.getElementById('pos-alert');
   if(!banner) return;
+  const def = STRATEGIES[p.strategy] || STRATEGIES.bps;
+  const strikeOf = id => p.legs.find(l => l.id === id)?.strike;
+  const label = p.strategy === 'ic' ? `${strikeOf('sellpe')}/${strikeOf('sellce')} Iron Condor` :
+                p.strategy === 'ss' ? `${strikeOf('sellpe')}/${strikeOf('sellce')} Strangle` :
+                p.strategy === 'bcs' ? `${strikeOf('sell')}/${strikeOf('buy')} CE` :
+                `${strikeOf('sell')}/${strikeOf('buy')} PE`;
   const messages = {
-    '50_HIT':   {color:'var(--green)', text:`🎯 50% TARGET HIT — ${p.symbol} ${p.sell}/${p.buy} PE · book half or watch toward 70%.`},
-    '70_LOCK':  {color:'var(--cyan)',  text:`🔒 70% PROFIT — ${p.symbol} ${p.sell}/${p.buy} PE · LOCK 50% (cost ${p.credit*0.5}) as tight SL; let the rest decay.`},
-    'SL_HIT':   {color:'var(--red)',   text:`🚨 STOP LOSS HIT — ${p.symbol} ${p.sell}/${p.buy} PE · exit now (cost reached spread width).`},
+    '50_HIT':   {color:'var(--green)', text:`🎯 50% TARGET HIT — ${p.symbol} ${label} · book half or watch toward 70%.`},
+    '70_LOCK':  {color:'var(--cyan)',  text:`🔒 70% PROFIT — ${p.symbol} ${label} · LOCK 50% (cost ${(p.credit*0.5).toFixed(2)}) as tight SL; let the rest decay.`},
+    'SL_HIT':   {color:'var(--red)',   text: st.defined
+                    ? `🚨 STOP LOSS HIT — ${p.symbol} ${label} · exit now (cost reached spread width).`
+                    : `🚨 STRANGLE SL — ${p.symbol} ${label} · close-out cost hit 2× credit received. Exit now.`},
   };
   const m = messages[st.badge]; if(!m) return;
   banner.innerHTML = `<div class="pos-alert-flash" style="border:1px solid ${m.color};background:#0a1420;color:${m.color};padding:10px 14px;border-radius:6px;font-weight:700;font-size:13px;display:flex;justify-content:space-between;align-items:center">
@@ -1629,26 +1901,33 @@ function renderPositions(){
   }
   const inr = n => '₹'+Number(n).toLocaleString('en-IN', {maximumFractionDigits:2});
   const cards = arr.map(p => {
+    const def = STRATEGIES[p.strategy] || STRATEGIES.bps;
     const st = positionState(p);
     const totalCredit = p.credit * p.lots * p.lotSize;
-    const totalMaxLoss = st.max_loss_per * p.lots * p.lotSize;
+    const totalMaxLoss = (st.max_loss_per != null) ? st.max_loss_per * p.lots * p.lotSize : null;
     const totalProfit = st.profit != null ? st.profit * p.lots * p.lotSize : null;
+    // Strategy-aware leg summary line
+    const legSummary = p.legs.map(l => {
+      const meta = def.legs.find(x => x.id === l.id);
+      return meta ? `${meta.side==='sell'?'S':'B'} ${meta.opt} ${l.strike}` : `${l.id} ${l.strike}`;
+    }).join(' · ');
     const badgeMap = {
       'OPEN':     {bg:'#1a2744', col:'#a0aec0', txt:'OPEN'},
       'LOSING':   {bg:'rgba(255,179,71,.15)', col:'var(--amber)', txt:'IN RED'},
       '50_HIT':   {bg:'rgba(0,255,157,.18)', col:'var(--green)', txt:'🎯 50% TARGET HIT'},
       '70_LOCK':  {bg:'rgba(0,229,255,.18)', col:'var(--cyan)',  txt:'🔒 70% — LOCK 50% AS TIGHT SL'},
-      'SL_HIT':   {bg:'rgba(255,68,102,.20)', col:'var(--red)',  txt:'🚨 SL HIT — EXIT'},
+      'SL_HIT':   {bg:'rgba(255,68,102,.20)', col:'var(--red)',  txt: st.defined ? '🚨 SL HIT — EXIT' : '🚨 SHORT PREMIUM DOUBLED — EXIT'},
     }[st.badge] || {bg:'#1a2744', col:'#a0aec0', txt:st.badge};
     const closedTint = p.closed ? 'opacity:.45' : '';
 
     // Live thermometer of currentCost vs key levels
     let bar = '';
     if(p.currentCost != null){
-      // 0 cost = 100% profit, width cost = max loss
-      const pos = Math.max(0, Math.min(100, (p.currentCost / st.width) * 100));
-      const p70 = (st.target70_cost / st.width) * 100;
-      const p50 = (st.target50_cost / st.width) * 100;
+      // 0 cost = 100% profit, sl_cost = SL trigger (width or 2×credit)
+      const denom = st.sl_cost || 1;
+      const pos = Math.max(0, Math.min(100, (p.currentCost / denom) * 100));
+      const p70 = (st.target70_cost / denom) * 100;
+      const p50 = (st.target50_cost / denom) * 100;
       bar = `<div style="position:relative;height:8px;background:#1a2744;border-radius:4px;margin:6px 0">
         <div style="position:absolute;left:0;top:0;bottom:0;width:${p70}%;background:rgba(0,229,255,.25)"></div>
         <div style="position:absolute;left:${p70}%;top:0;bottom:0;width:${p50-p70}%;background:rgba(0,255,157,.25)"></div>
@@ -1660,20 +1939,29 @@ function renderPositions(){
       </div>`;
     }
 
+    // Break-even is strategy-specific
+    let breakEvenText = '—';
+    const strikeOf = id => p.legs.find(l => l.id === id)?.strike;
+    if(p.strategy === 'bps') breakEvenText = inr(strikeOf('sell') - p.credit);
+    else if(p.strategy === 'bcs') breakEvenText = inr(strikeOf('sell') + p.credit);
+    else if(p.strategy === 'ss')  breakEvenText = `${inr(strikeOf('sellpe') - p.credit)} · ${inr(strikeOf('sellce') + p.credit)}`;
+    else if(p.strategy === 'ic')  breakEvenText = `${inr(strikeOf('sellpe') - p.credit)} · ${inr(strikeOf('sellce') + p.credit)}`;
+
     return `<div style="border:1px solid var(--border);background:#0a1420;border-radius:6px;padding:12px;margin-bottom:10px;${closedTint}">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px">
         <div>
           <span style="font-size:14px;font-weight:700;color:#e2e8f0">${p.symbol}</span>
-          <span style="font-size:10px;color:var(--dim);margin-left:8px">${p.sell} / ${p.buy} PE · ${p.lots} lot${p.lots>1?'s':''} × ${p.lotSize}${p.expiry?' · exp '+p.expiry:''}${p.entry?' · entered '+p.entry:''}</span>
+          <span style="font-size:10px;font-weight:700;color:${def.color};margin-left:6px">${def.label}</span>
+          <span style="font-size:10px;color:var(--dim);margin-left:8px">${legSummary} · ${p.lots} lot${p.lots>1?'s':''} × ${p.lotSize}${p.expiry?' · exp '+p.expiry:''}${p.entry?' · entered '+p.entry:''}</span>
         </div>
         <span style="background:${badgeMap.bg};color:${badgeMap.col};border:1px solid ${badgeMap.col};padding:3px 10px;border-radius:4px;font-weight:700;font-size:11px">${badgeMap.txt}</span>
       </div>
 
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;font-size:11px;color:#a0aec0;margin-bottom:8px">
         <div><div style="color:var(--dim);font-size:9px;text-transform:uppercase">Net credit</div><div style="color:var(--green);font-weight:700">${inr(totalCredit)}</div></div>
-        <div><div style="color:var(--dim);font-size:9px;text-transform:uppercase">Max loss</div><div style="color:var(--red);font-weight:700">${inr(totalMaxLoss)}</div></div>
-        <div><div style="color:var(--dim);font-size:9px;text-transform:uppercase">Break-even</div><div>${inr(p.sell - p.credit)}</div></div>
-        <div><div style="color:var(--dim);font-size:9px;text-transform:uppercase">Width</div><div>${st.width}</div></div>
+        <div><div style="color:var(--dim);font-size:9px;text-transform:uppercase">Max loss</div><div style="color:var(--red);font-weight:700">${totalMaxLoss==null?'undefined ⚠':inr(totalMaxLoss)}</div></div>
+        <div><div style="color:var(--dim);font-size:9px;text-transform:uppercase">Break-even</div><div>${breakEvenText}</div></div>
+        <div><div style="color:var(--dim);font-size:9px;text-transform:uppercase">${st.defined?'Width':'SL cost (2× credit)'}</div><div>${st.defined?st.width:st.sl_cost}</div></div>
         <div><div style="color:var(--dim);font-size:9px;text-transform:uppercase">Current P&L</div><div style="color:${st.profit==null?'var(--dim)':st.profit>=0?'var(--green)':'var(--red)'};font-weight:700">${st.profit==null?'—':(st.profit>=0?'+':'')+inr(totalProfit)} ${st.profitPct==null?'':'('+(st.profitPct>=0?'+':'')+st.profitPct.toFixed(1)+'%)'}</div></div>
       </div>
 
@@ -1932,6 +2220,9 @@ document.addEventListener('DOMContentLoaded', ()=>{
   const arr = loadPositions();
   const b = document.getElementById('pos-count-badge');
   if(b) b.textContent = arr.length ? arr.length : '';
+
+  // Initialize the strategy-specific leg inputs so the form is usable on first open
+  if(document.getElementById('pos-strategy')) posStrategyChanged();
 
   // Real live data from the local NSE proxy (server.py)
   refreshLive();
