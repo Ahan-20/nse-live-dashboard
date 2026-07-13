@@ -331,11 +331,17 @@ class KiteProvider(IntradayProvider):
             for it in ("CE", "PE"):
                 if it in by_strike[s]:
                     all_tokens.append(by_strike[s][it]["token"])
-        # Kite's /quote query param is 'i' repeated. Batch 400 at a time.
+        # Kite's /quote endpoint prefers EXCHANGE:TRADINGSYMBOL (colon URL-encoded).
+        # Raw tokens sometimes return 400. Batch 400 per call.
+        identifiers = []
+        for s in strikes_sorted:
+            for it in ("CE", "PE"):
+                if it in by_strike[s]:
+                    identifiers.append(f"NFO:{by_strike[s][it]['tradingsymbol']}")
         quotes = {}
-        for i in range(0, len(all_tokens), 400):
-            batch = all_tokens[i:i + 400]
-            qs = "&".join(f"i={t}" for t in batch)
+        for i in range(0, len(identifiers), 400):
+            batch = identifiers[i:i + 400]
+            qs = "&".join(f"i={urllib.parse.quote(idn)}" for idn in batch)
             try:
                 d = self._get(f"/quote?{qs}")
             except Exception:
@@ -353,8 +359,9 @@ class KiteProvider(IntradayProvider):
             for it in ("CE", "PE"):
                 if it not in slot:
                     continue
-                q = quotes.get(str(slot[it]["token"])) or \
-                    quotes.get(f"NFO:{slot[it]['tradingsymbol']}")
+                # Kite returns keyed by "NFO:tradingsymbol"
+                q = quotes.get(f"NFO:{slot[it]['tradingsymbol']}") or \
+                    quotes.get(str(slot[it]["token"]))
                 if not q:
                     continue
                 spot = spot or float(q.get("underlying_value") or 0)
@@ -430,24 +437,25 @@ class KiteProvider(IntradayProvider):
         if not tokens:
             return [{**w, "ltp": None, "oi": None} for w in want]
 
-        # Batch quote
+        # Batch quote — use NFO:tradingsymbol (Kite's preferred identifier)
+        identifiers = [f"NFO:{w['tradingsymbol']}" for w in want if w.get("tradingsymbol")]
         quotes = {}
-        for i in range(0, len(tokens), 400):
-            batch = tokens[i:i + 400]
-            qs = "&".join(f"i={t}" for t in batch)
+        for i in range(0, len(identifiers), 400):
+            batch = identifiers[i:i + 400]
+            qs = "&".join(f"i={urllib.parse.quote(idn)}" for idn in batch)
             try:
                 d = self._get(f"/quote?{qs}")
                 quotes.update((d.get("data") or {}))
             except Exception:
                 continue
 
-        # Attach LTP + OI to each leg
+        # Attach LTP + OI to each leg (Kite returns keyed by NFO:tradingsymbol)
         out = []
         for w in want:
             q = None
-            if w["token"]:
-                q = quotes.get(str(w["token"])) or \
-                    quotes.get(f"NFO:{w['tradingsymbol']}")
+            if w.get("tradingsymbol"):
+                q = quotes.get(f"NFO:{w['tradingsymbol']}") or \
+                    quotes.get(str(w["token"]))
             if q:
                 out.append({**w, "ltp": float(q.get("last_price") or 0),
                             "oi":  int(q.get("oi") or 0)})

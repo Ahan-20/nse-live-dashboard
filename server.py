@@ -1437,12 +1437,15 @@ class Handler(BaseHTTPRequestHandler):
                 lookup_keys_tried = []
                 lookup_results = {}
                 if probes:
-                    tokens = [p["token"] for p in probes]
-                    qs = "&".join(f"i={t}" for t in tokens)
+                    # Try both formats — token AND EXCHANGE:TRADINGSYMBOL — so
+                    # we can see which one Kite actually accepts.
+                    identifiers = [f"NFO:{p['tradingsymbol']}" for p in probes]
+                    qs = "&".join(f"i={urllib.parse.quote(idn)}" for idn in identifiers)
                     try:
                         raw_quote_response = INTRADAY._get(f"/quote?{qs}")
                     except Exception as e:
-                        raw_quote_response = {"error": f"{type(e).__name__}: {e}"}
+                        raw_quote_response = {"error": f"{type(e).__name__}: {e}",
+                                              "url_tried": f"/quote?{qs}"}
                     # Show what keys we'd try and whether they hit
                     data = ((raw_quote_response or {}).get("data") or {})
                     for p in probes:
