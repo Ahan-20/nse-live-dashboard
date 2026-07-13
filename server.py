@@ -1416,6 +1416,63 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 rep = {"ok": False, "error": str(e)}
             return self._send(200, json.dumps(rep).encode("utf-8"), "application/json")
+        if self.path.startswith("/api/kite-debug"):
+            # Returns raw Kite state so we can see WHY option chain fetch fails.
+            # Read-only diagnostic; safe to expose (no secrets in output).
+            try:
+                inst = INTRADAY._nfo_instruments()
+                nifty_opts = [r for r in inst
+                              if r.get("name") == "NIFTY"
+                              and r.get("segment") == "NFO-OPT"]
+                # Pick nearest upcoming expiry
+                today = datetime.date.today().isoformat()
+                upcoming = sorted({r["expiry"] for r in nifty_opts if r["expiry"] >= today})
+                near_expiry = upcoming[0] if upcoming else None
+                same_expiry = [r for r in nifty_opts if r["expiry"] == near_expiry] if near_expiry else []
+                # Grab first CE + first PE + do a /quote call
+                sample_ce = next((r for r in same_expiry if r["instrument_type"] == "CE"), None)
+                sample_pe = next((r for r in same_expiry if r["instrument_type"] == "PE"), None)
+                probes = [x for x in (sample_ce, sample_pe) if x]
+                raw_quote_response = None
+                lookup_keys_tried = []
+                lookup_results = {}
+                if probes:
+                    tokens = [p["token"] for p in probes]
+                    qs = "&".join(f"i={t}" for t in tokens)
+                    try:
+                        raw_quote_response = INTRADAY._get(f"/quote?{qs}")
+                    except Exception as e:
+                        raw_quote_response = {"error": f"{type(e).__name__}: {e}"}
+                    # Show what keys we'd try and whether they hit
+                    data = ((raw_quote_response or {}).get("data") or {})
+                    for p in probes:
+                        k1 = str(p["token"])
+                        k2 = f"NFO:{p['tradingsymbol']}"
+                        lookup_keys_tried.append({
+                            "tradingsymbol": p["tradingsymbol"],
+                            "token": p["token"],
+                            "tried_str_token": k1 in data,
+                            "tried_nfo_prefix": k2 in data,
+                            "actual_response_keys": list(data.keys())[:5],
+                        })
+                rep = {
+                    "ok": True,
+                    "total_nfo_rows": len(inst),
+                    "nifty_opt_rows": len(nifty_opts),
+                    "upcoming_expiries": upcoming[:5],
+                    "nearest_expiry": near_expiry,
+                    "strikes_in_nearest": len(same_expiry),
+                    "sample_ce": sample_ce and {k: sample_ce[k] for k in
+                                    ("tradingsymbol","token","strike","expiry","instrument_type")},
+                    "sample_pe": sample_pe and {k: sample_pe[k] for k in
+                                    ("tradingsymbol","token","strike","expiry","instrument_type")},
+                    "raw_quote_response": raw_quote_response,
+                    "lookup_analysis": lookup_keys_tried,
+                }
+            except Exception as e:
+                rep = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+            return self._send(200, json.dumps(rep, default=str).encode("utf-8"),
+                              "application/json")
         if self.path.startswith("/api/position-quote"):
             # GET: /api/position-quote?legs=<url-encoded JSON list>&strategy=bps
             # Frontend just URL-encodes the position's legs so we can bulk-price
