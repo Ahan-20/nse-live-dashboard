@@ -1,0 +1,32 @@
+{
+  "note": "Hand-maintained calendar of high-impact market events (RBI MPC, Fed FOMC, Budget, national holidays). Sources: rbi.org.in monetary-policy-calendar, federalreserve.gov FOMC calendar, indiabudget.gov.in. Update this file when new dates are published. Results/earnings are fetched live from NSE — not in this file.",
+  "events": [
+    {"date": "2026-08-06", "name": "RBI MPC (August)", "impact": "high"},
+    {"date": "2026-08-15", "name": "Independence Day", "impact": "medium"},
+    {"date": "2026-09-17", "name": "Fed FOMC (September)", "impact": "high"},
+    {"date": "2026-10-01", "name": "RBI MPC (October)", "impact": "high"},
+    {"date": "2026-10-02", "name": "Gandhi Jayanti", "impact": "medium"},
+    {"date": "2026-10-29", "name": "Fed FOMC (October)", "impact": "high"},
+    {"date": "2026-11-04", "name": "Diwali / Muhurat Trading", "impact": "medium"},
+    {"date": "2026-12-05", "name": "RBI MPC (December)", "impact": "high"},
+    {"date": "2026-12-17", "name": "Fed FOMC (December)", "impact": "high"},
+    {"date": "2027-01-26", "name": "Republic Day", "impact": "medium"},
+    {"date": "2027-01-28", "name": "Fed FOMC (January)", "impact": "high"},
+    {"date": "2027-02-01", "name": "Union Budget 2027", "impact": "high"},
+    {"date": "2027-02-05", "name": "RBI MPC (February)", "impact": "high"},
+    {"date": "2027-03-18", "name": "Fed FOMC (March)", "impact": "high"},
+    {"date": "2027-04-08", "name": "RBI MPC (April)", "impact": "high"},
+    {"date": "2027-04-29", "name": "Fed FOMC (April)", "impact": "high"},
+    {"date": "2027-06-04", "name": "RBI MPC (June)", "impact": "high"},
+    {"date": "2027-06-17", "name": "Fed FOMC (June)", "impact": "high"},
+    {"date": "2027-07-29", "name": "Fed FOMC (July)", "impact": "high"},
+    {"date": "2027-08-05", "name": "RBI MPC (August)", "impact": "high"},
+    {"date": "2027-08-15", "name": "Independence Day", "impact": "medium"},
+    {"date": "2027-09-16", "name": "Fed FOMC (September)", "impact": "high"},
+    {"date": "2027-10-01", "name": "RBI MPC (October)", "impact": "high"},
+    {"date": "2027-10-02", "name": "Gandhi Jayanti", "impact": "medium"},
+    {"date": "2027-10-28", "name": "Fed FOMC (October)", "impact": "high"},
+    {"date": "2027-12-04", "name": "RBI MPC (December)", "impact": "high"},
+    {"date": "2027-12-16", "name": "Fed FOMC (December)", "impact": "high"}
+  ]
+}

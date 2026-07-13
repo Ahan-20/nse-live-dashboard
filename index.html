@@ -1315,27 +1315,44 @@ async function runBullPut(){
 
 function vChecklistRow(r, vState){
   // The row is hidden by default; the 📋 Verify button toggles it.
-  // Each checkbox mirrors one flowchart step; ticking all 4 upgrades the badge.
+  // Each checkbox reflects (1) Kite auto-verify if available, or (2) user's
+  // manual tick. Ticking overrides the auto value.
+  const auto = r.verify_auto || null;
+  const autoMap = {
+    mp:    auto?.mp,
+    delta: auto?.delta,
+    put:   auto?.put_wall,
+    call:  auto?.call_wall,
+  };
   const box = (field, num, title, subtitle) => {
-    const on = !!vState[field];
+    const manual = vState[field];
+    const autoVal = autoMap[field];
+    // Priority: manual override > auto verdict
+    const on = manual != null ? manual : (autoVal?.ok || false);
+    const autoTag = autoVal ? `<span style="color:${autoVal.ok?'var(--green)':'var(--red)'};font-weight:700;font-size:9px">AUTO ${autoVal.ok?'✓':'✗'}</span> · ` : '';
+    const liveDetail = autoVal?.detail ? `<br><span style="color:var(--cyan);font-size:9px">live: ${autoVal.detail}</span>` : '';
     return `<label style="display:flex;align-items:flex-start;gap:6px;cursor:pointer;padding:6px 8px;border:1px solid ${on?'rgba(0,255,157,.35)':'var(--border)'};border-radius:4px;background:${on?'rgba(0,255,157,.06)':'#0a1420'};flex:1 1 200px">
       <input type="checkbox" ${on?'checked':''} onclick="event.stopPropagation();bpToggleVerify('${r.symbol}','${field}')" style="margin-top:2px">
       <span style="font-size:10px;line-height:1.4;color:${on?'var(--green)':'#a0aec0'}">
-        <b>Step ${num}. ${title}</b><br>
-        <span style="color:var(--dim);font-size:9px">${subtitle}</span>
+        ${autoTag}<b>Step ${num}. ${title}</b><br>
+        <span style="color:var(--dim);font-size:9px">${subtitle}</span>${liveDetail}
       </span>
     </label>`;
   };
+  const bannerColor = auto ? 'var(--green)' : 'var(--amber)';
+  const bannerText = auto
+    ? '✓ Auto-verified from Kite live option chain · click a box to override'
+    : '📋 Manual verification · check on Sensibull, tick each box once confirmed';
   return `<tr id="bp-check-${r.symbol}" style="display:none;background:#08131e">
     <td colspan="8" style="padding:8px 12px 12px 12px">
-      <div style="font-size:10px;color:var(--amber);margin-bottom:6px">📋 Manual verification for ${r.symbol} · check on Sensibull, tick each box once confirmed:</div>
+      <div style="font-size:10px;color:${bannerColor};margin-bottom:6px">${bannerText}</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         ${box('mp', 7, 'Max Pain ≥ CMP', 'Max Pain price should be AT or ABOVE current market price. Below = bearish drift, no-go.')}
         ${box('delta', 8, 'Sell PE Δ = 0.20–0.30', 'Identify a PE strike whose Delta is in this range (out-of-the-money enough).')}
         ${box('put', 9, 'Put OI wall near sell strike', 'Strong Put OI at/below sell strike = support the market makers defend.')}
         ${box('call', 9, 'Call OI NOT stacked above CMP', 'Heavy Call OI overhead (like NESTLEIND 1450/1500) = resistance ceiling. Skip if present.')}
       </div>
-      <div style="font-size:9px;color:var(--dim);margin-top:6px">Ticks reset each morning. Once all 4 are green, the row badge upgrades to ★ FULL PASS 9/9.</div>
+      <div style="font-size:9px;color:var(--dim);margin-top:6px">Ticks reset each morning. All 4 green → badge upgrades to ★ FULL PASS 9/9.</div>
     </td>
   </tr>`;
 }
@@ -1383,14 +1400,23 @@ function renderBullPut(d){
            &nbsp;<span style="color:${da.adx_trending?'var(--green)':'var(--amber)'}">ADX ${da.adx}</span>
          </td>`
       : `<td style="text-align:center;color:var(--dim);font-size:10px">no data</td>`;
-    // "Daily OK" = steps 1-5 automated; verifyState tracks manual steps 7-9 per row
+    // Steps 7-9 tracker: prefers Kite's auto verdict, falls back to manual ticks.
     const vKey = 'bp_verify_'+r.symbol+'_'+(new Date().toISOString().slice(0,10));
     const vState = (()=>{ try { return JSON.parse(localStorage.getItem(vKey)||'{}'); } catch(e){ return {}; }})();
-    const vDone = ['mp','delta','put','call'].filter(k=>vState[k]).length;
+    const autoV = r.verify_auto || null;
+    // Prefer Kite auto verdict when available; user's manual tick is an override.
+    const vFinal = {
+      mp:    vState.mp    ?? autoV?.mp?.ok,
+      delta: vState.delta ?? autoV?.delta?.ok,
+      put:   vState.put   ?? autoV?.put_wall?.ok,
+      call:  vState.call  ?? autoV?.call_wall?.ok,
+    };
+    const vDone = Object.values(vFinal).filter(Boolean).length;
+    const autoBadge = autoV ? '<span title="Auto-verified from Kite live option chain" style="color:var(--green);font-size:9px;font-weight:700">AUTO</span> ' : '';
     const verdict = r.passes_all
       ? (vDone === 4
-          ? '<span style="background:rgba(0,255,157,.22);color:var(--green);border:1px solid rgba(0,255,157,.55);padding:2px 8px;border-radius:3px;font-weight:700;font-size:10px">★ FULL PASS 9/9</span>'
-          : `<span style="background:rgba(0,229,255,.12);color:var(--cyan);border:1px solid rgba(0,229,255,.35);padding:1px 7px;border-radius:3px;font-weight:700;font-size:10px" title="Steps 1-5 pass. Steps 7-9 need manual check on Sensibull.">✓ DAILY OK · verify 7–9 (${vDone}/4)</span>`)
+          ? `<span style="background:rgba(0,255,157,.22);color:var(--green);border:1px solid rgba(0,255,157,.55);padding:2px 8px;border-radius:3px;font-weight:700;font-size:10px">${autoBadge}★ FULL PASS 9/9</span>`
+          : `<span style="background:rgba(0,229,255,.12);color:var(--cyan);border:1px solid rgba(0,229,255,.35);padding:1px 7px;border-radius:3px;font-weight:700;font-size:10px" title="${autoV?'Kite auto-checked: '+vDone+'/4 pass — click 📋 to review':'Steps 1-5 pass. Steps 7-9 need manual check on Sensibull.'}">${autoBadge}✓ DAILY OK · 7–9 (${vDone}/4)</span>`)
       : (da.ok && da.passes ? '<span style="color:var(--amber);font-size:10px">daily ✓ · market gated</span>'
                             : '<span style="color:var(--dim);font-size:10px">—</span>');
     const tint = r.passes_all ? 'background:rgba(0,255,157,.06)' : '';

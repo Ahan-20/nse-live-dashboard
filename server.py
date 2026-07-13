@@ -126,6 +126,167 @@ def nse_get(path):
         return json.loads(_opener.open(req, timeout=12).read().decode("utf-8"))
 
 
+# ── Daily IV recorder → 30-day IV percentile (TEF-90 step 9) ─────────
+# Kite gives current IV only, not historical. So we record ATM IV once per
+# trading day into a small SQLite file. Once we have ≥ 30 days of history,
+# we can compute the percentile automatically. Until then, the factor stays
+# manual with a "collecting: N/30 days" note.
+
+import sqlite3
+
+IV_DB = os.path.join(HERE, "iv_history.db")
+
+
+def _iv_db():
+    con = sqlite3.connect(IV_DB)
+    con.execute("""CREATE TABLE IF NOT EXISTS iv_daily(
+        date TEXT PRIMARY KEY,
+        underlying TEXT,
+        atm_iv REAL,
+        spot REAL,
+        recorded_at REAL
+    )""")
+    con.commit()
+    return con
+
+
+def _record_atm_iv_if_new(chain):
+    """Persist today's ATM IV once per day. Idempotent."""
+    if not chain or not chain.get("strikes"):
+        return
+    today = datetime.date.today().isoformat()
+    con = _iv_db()
+    exists = con.execute(
+        "SELECT 1 FROM iv_daily WHERE date=? AND underlying=?",
+        (today, chain.get("underlying", "NIFTY"))).fetchone()
+    if exists:
+        con.close(); return
+    # ATM IV = IV of the strike closest to spot
+    spot = chain.get("spot") or 0
+    strikes = chain.get("strikes", [])
+    if not spot or not strikes:
+        con.close(); return
+    closest = min(strikes, key=lambda r: abs(r["strike"] - spot))
+    atm_iv = 0.0
+    for side in ("ce", "pe"):
+        d = closest.get(side) or {}
+        iv = d.get("iv", 0) or 0
+        if iv > 0:
+            atm_iv = float(iv)
+            break
+    if atm_iv > 0:
+        con.execute("INSERT OR REPLACE INTO iv_daily VALUES (?,?,?,?,?)",
+                    (today, chain.get("underlying", "NIFTY"),
+                     atm_iv, spot, time.time()))
+        con.commit()
+    con.close()
+
+
+def _iv_percentile(underlying="NIFTY", window_days=90):
+    """Return (auto, ok, detail) for the IV Percentile factor.
+    Needs ≥ 30 rows of history to compute meaningfully."""
+    try:
+        con = _iv_db()
+        rows = con.execute(
+            "SELECT date, atm_iv FROM iv_daily WHERE underlying=? "
+            "ORDER BY date DESC LIMIT ?",
+            (underlying, window_days)).fetchall()
+        con.close()
+    except Exception:
+        return (False, None, "Verify IV Percentile > 50 on Sensibull")
+    n = len(rows)
+    if n < 30:
+        return (False, None,
+                f"Verify IV Percentile > 50 on Sensibull (collecting: {n}/30 days)")
+    ivs = sorted(r[1] for r in rows if r[1] and r[1] > 0)
+    today_iv = rows[0][1]                  # rows[0] is newest by SELECT ORDER BY DESC
+    # Percentile of today's IV among the window
+    below = sum(1 for v in ivs if v < today_iv)
+    pctile = (below / len(ivs)) * 100 if ivs else 0
+    return (True, pctile > 50,
+            f"IV Percentile = {pctile:.0f}% ({n}d window; today IV {today_iv:.1f})")
+
+
+# ── High-impact event calendar (auto-tick TEF-90 step 10) ───────────
+_events_cache = None
+_events_at = 0.0
+
+
+def _load_events():
+    """Read events.json once and cache. Returns list of {date, name, impact}."""
+    global _events_cache, _events_at
+    if _events_cache is not None and (time.time() - _events_at) < 3600:
+        return _events_cache
+    try:
+        with open(os.path.join(HERE, "events.json")) as f:
+            d = json.load(f)
+        _events_cache = d.get("events", [])
+        _events_at = time.time()
+    except Exception:
+        _events_cache = []
+        _events_at = time.time()
+    return _events_cache
+
+
+def _check_event_window(today, days=3):
+    """(auto, ok, detail) — 'ok' is True when NO high-impact event falls within
+    `days` calendar days from `today`. Returns detail string naming what/when."""
+    horizon = today + datetime.timedelta(days=days)
+    events = _load_events()
+    hits = []
+    for e in events:
+        try:
+            ed = datetime.date.fromisoformat(e["date"])
+        except Exception:
+            continue
+        if today <= ed <= horizon and e.get("impact") == "high":
+            hits.append((ed, e["name"]))
+    hits.sort()
+    if hits:
+        d, n = hits[0]
+        days_off = (d - today).days
+        when = "today" if days_off == 0 else f"in {days_off} day{'s' if days_off > 1 else ''}"
+        return True, False, f"⚠ {n} {when}"
+    # Also pull upcoming results from NSE corporate-actions (best-effort, cached)
+    try:
+        earnings = _upcoming_earnings_next(days)
+        if earnings:
+            e = earnings[0]
+            return True, False, f"⚠ Results: {e['symbol']} on {e['date']}"
+    except Exception:
+        pass
+    return True, True, f"no high-impact events in next {days} days ✓"
+
+
+_earnings_cache = {"t": 0.0, "data": []}
+
+
+def _upcoming_earnings_next(days=3):
+    """Best-effort: query NSE's corporate-actions endpoint for FORTHCOMING results
+    within `days`. Cached 1 h. Empty list on any failure."""
+    if time.time() - _earnings_cache["t"] < 3600 and _earnings_cache["data"]:
+        return _earnings_cache["data"]
+    try:
+        d = nse_get("/api/corporates-corporateActions?index=equities&subject=Financial%20Results")
+    except Exception:
+        return []
+    today = datetime.date.today()
+    horizon = today + datetime.timedelta(days=days)
+    hits = []
+    for row in (d or []):
+        try:
+            # NSE format: "24-Aug-2026"
+            ex = row.get("exDate") or row.get("recDate") or ""
+            d1 = datetime.datetime.strptime(ex, "%d-%b-%Y").date()
+            if today <= d1 <= horizon:
+                hits.append({"symbol": row.get("symbol", "?"), "date": d1.isoformat()})
+        except Exception:
+            continue
+    _earnings_cache["data"] = hits
+    _earnings_cache["t"] = time.time()
+    return hits
+
+
 # ── Kite Connect: request-token → access-token exchange ──────────────
 def _kite_exchange_request_token(request_token):
     """POST to /session/token with a SHA-256 checksum. Returns access_token."""
@@ -590,6 +751,83 @@ def _stock_daily_indicators(sym):
         return None
 
 
+def _bullput_verify_from_chain(symbol, spot):
+    """Auto-compute the 4 flowchart checklist items from a live Kite option chain.
+    Returns {mp, delta, put_wall, call_wall} — each a dict with {ok, detail}."""
+    chain = INTRADAY.option_chain(symbol)
+    if not chain or not chain.get("strikes"):
+        return None
+    strikes = chain["strikes"]
+    max_pain = chain.get("max_pain", 0)
+    cmp_ = chain.get("spot") or spot
+
+    # (7) Max Pain ≥ CMP  → market makers benefit from price staying up/rising
+    mp_ok = max_pain >= cmp_
+    mp_detail = (f"Max Pain {int(max_pain)} vs CMP {int(cmp_)} "
+                 f"({int(max_pain - cmp_):+d})")
+
+    # (8) Sell PE Δ 0.20-0.30  → find a PE strike with abs(Δ) in that range.
+    #     Uses put-call parity approximation from OTM PE prices:
+    #       For a PE below spot, if strike moves up by 1, PE gains ~|Δ|.
+    #     Cleaner: use the strike whose PE LTP suggests it's about 20-30% OTM.
+    #     Delta ≈ 0.25 for a PE roughly 1 ATR below spot on typical F&O expiries.
+    #     We approximate by picking the strike between 92-96% of spot (delta band
+    #     for 20-30 days to expiry).
+    tgt_lo = cmp_ * 0.92
+    tgt_hi = cmp_ * 0.96
+    delta_pe = None
+    for r in strikes:
+        s = r["strike"]
+        if tgt_lo <= s <= tgt_hi and r.get("pe") and r["pe"].get("ltp", 0) > 0:
+            delta_pe = s
+            break
+    delta_ok = delta_pe is not None
+    delta_detail = (f"~Δ 0.20-0.30 PE strike ≈ {int(delta_pe)}"
+                    if delta_pe else "no PE strike in the 92-96% band with liquid LTP")
+
+    # (9a) Put OI wall near sell strike  → a big Put-OI strike within 3% of it
+    put_wall_ok = False
+    put_wall_detail = "no Put OI wall near sell strike"
+    if delta_pe is not None:
+        put_ois = [(r["strike"], (r.get("pe") or {}).get("oi", 0))
+                   for r in strikes if r["strike"] <= cmp_]
+        if put_ois:
+            biggest = max(put_ois, key=lambda x: x[1])
+            median = sorted(o for _, o in put_ois if o > 0)
+            med = median[len(median) // 2] if median else 0
+            near = abs(biggest[0] - delta_pe) / delta_pe <= 0.03
+            strong = med > 0 and biggest[1] > 2 * med
+            put_wall_ok = near and strong
+            put_wall_detail = (f"biggest Put OI @ {int(biggest[0])} "
+                               f"({biggest[1]:,}) — "
+                               f"{'near' if near else 'far from'} sell strike {int(delta_pe)}")
+
+    # (9b) Call OI NOT stacked above CMP  → total Call OI above CMP should NOT
+    #      dominate total Call OI below. If it does, there's overhead resistance.
+    calls_above = sum((r.get("ce") or {}).get("oi", 0)
+                      for r in strikes if r["strike"] > cmp_)
+    calls_below = sum((r.get("ce") or {}).get("oi", 0)
+                      for r in strikes if r["strike"] <= cmp_)
+    total_calls = calls_above + calls_below
+    if total_calls == 0:
+        call_ok = False
+        call_detail = "no Call OI data"
+    else:
+        ratio = calls_above / total_calls
+        # Healthy = calls balanced or leaning below CMP (no overhead ceiling).
+        # If >60% of Call OI is stacked above CMP, that's a bearish overhead.
+        call_ok = ratio < 0.60
+        call_detail = (f"{int(ratio*100)}% of Call OI is above CMP "
+                       f"({'stacked overhead' if not call_ok else 'not overhead-heavy'})")
+
+    return {
+        "mp":        {"ok": mp_ok,        "detail": mp_detail},
+        "delta":     {"ok": delta_ok,     "detail": delta_detail},
+        "put_wall":  {"ok": put_wall_ok,  "detail": put_wall_detail},
+        "call_wall": {"ok": call_ok,      "detail": call_detail},
+    }
+
+
 def build_bullput():
     all_idx = nse_get("/api/allIndices")
     by_name = {r.get("index"): float(r.get("percentChange", 0))
@@ -675,6 +913,16 @@ def build_bullput():
         passes_step4 = match_score >= 3
         all_pass = market_ok and passes_step4 and daily_pass
 
+        # ── Auto-tick steps 7-9 from live Kite option chain (per stock) ──
+        # Only fetch for candidates that already pass daily filters — keeps the
+        # scan fast (5-10 chain fetches instead of 20).
+        verify = None
+        if all_pass and INTRADAY and INTRADAY.enabled and hasattr(INTRADAY, "option_chain"):
+            try:
+                verify = _bullput_verify_from_chain(sym, ltp)
+            except Exception:
+                verify = None
+
         rows.append({
             "symbol": sym, "chg": round(ch, 2), "ltp": round(ltp, 2),
             "lot_size": LOT_SIZES.get(sym),
@@ -683,6 +931,7 @@ def build_bullput():
             "fo_match": {"score": match_score, "filters": match_filters},
             "daily": daily,
             "passes_all": all_pass,
+            "verify_auto": verify,     # None = still manual; dict = auto-ticked
             "links": {
                 "sensibull": f"https://web.sensibull.com/option-chain?tradingsymbol={sym}",
                 "nse_chain": f"https://www.nseindia.com/option-chain?symbol={sym}",
@@ -807,6 +1056,14 @@ def build_tef_score():
     # (Removed: Date filter. Abhishek prefers score to reflect market state only,
     # not the calendar-based OI-build heuristic.)
 
+    # === Event calendar (RBI/Fed/Budget/results in next 3 days) ===
+    ev_auto = ev_ok = False
+    ev_detail = "Confirm no RBI/Fed/Budget/results in next 3 days"
+    try:
+        ev_auto, ev_ok, ev_detail = _check_event_window(today, days=3)
+    except Exception:
+        pass
+
     # 2. Sideways / Near 200 EMA: distance from 200 EMA in ATR units
     dist_pct = (cmp - e200[-1]) / e200[-1] * 100 if e200[-1] else 0
     near_ema = abs(dist_pct) < 3.0                # within ~3% = sideways-ish
@@ -848,11 +1105,13 @@ def build_tef_score():
     else:
         market_type = "mixed"
 
-    # === PCR + Max Pain from live NIFTY option chain (Kite-only) ===
-    pcr_auto = mp_auto = False
-    pcr_ok = mp_ok = None
+    # === PCR + Max Pain + OI walls + IV %ile from live NIFTY option chain ===
+    pcr_auto = mp_auto = oi_walls_auto = iv_auto = False
+    pcr_ok = mp_ok = oi_walls_ok = iv_ok = None
     pcr_detail = "Verify PCR is 0.9-1.2 on Sensibull"
     mp_detail = "Verify Max Pain within ±100 pts of CMP"
+    oi_walls_detail = "Both Put + Call OI walls near CMP (both sides supported)"
+    iv_detail = "Verify IV Percentile > 50 on Sensibull"
     pcr_val = None; max_pain_val = None
     if INTRADAY and INTRADAY.enabled and hasattr(INTRADAY, "option_chain"):
         try:
@@ -869,18 +1128,58 @@ def build_tef_score():
                     mp_ok = abs(max_pain_val - nifty_spot) <= 100
                     mp_detail = (f"Max Pain {int(max_pain_val)} vs CMP {int(nifty_spot)} "
                                  f"({int(max_pain_val - nifty_spot):+d} pts)")
+
+                # Record today's ATM IV (idempotent) and compute the percentile
+                _record_atm_iv_if_new(chain)
+                iv_auto, iv_ok, iv_detail = _iv_percentile("NIFTY")
+
+                # ── OI walls: check Put wall below CMP AND Call wall above CMP ──
+                # A "wall" = strike whose OI exceeds 2× the median non-zero OI in
+                # its side. A healthy range-bound market has BOTH so a Strangle
+                # / Iron Condor has support and resistance to lean on.
+                strikes = chain.get("strikes", [])
+                if strikes and nifty_spot:
+                    put_ois = [(r["strike"], (r["pe"] or {}).get("oi", 0))
+                               for r in strikes if r["strike"] < nifty_spot and r.get("pe")]
+                    call_ois = [(r["strike"], (r["ce"] or {}).get("oi", 0))
+                                for r in strikes if r["strike"] > nifty_spot and r.get("ce")]
+                    put_median = sorted(o for _, o in put_ois if o > 0)
+                    call_median = sorted(o for _, o in call_ois if o > 0)
+                    def _median(xs): return xs[len(xs) // 2] if xs else 0
+                    p_med = _median(put_median)
+                    c_med = _median(call_median)
+                    # Find biggest Put OI below CMP and biggest Call OI above
+                    put_wall = max(put_ois, key=lambda x: x[1], default=(None, 0))
+                    call_wall = max(call_ois, key=lambda x: x[1], default=(None, 0))
+                    has_put_wall = put_wall[0] is not None and p_med > 0 and put_wall[1] > 2 * p_med
+                    has_call_wall = call_wall[0] is not None and c_med > 0 and call_wall[1] > 2 * c_med
+                    oi_walls_auto = True
+                    oi_walls_ok = has_put_wall and has_call_wall
+                    if put_wall[0] and call_wall[0]:
+                        oi_walls_detail = (
+                            f"Put wall @ {int(put_wall[0])} (OI {put_wall[1]:,}); "
+                            f"Call wall @ {int(call_wall[0])} (OI {call_wall[1]:,})")
         except Exception:
             pass
 
     # Auto-score tally (6 base items + optional 2 auto-ticked via Kite chain)
     auto_score = sum([near_ema, no_strong_trend, range_bound,
                       small_candles, no_gap, rsi_neutral])
-    # PCR + Max Pain now auto-ticked when Kite is connected
+    # PCR + Max Pain + OI walls + IV percentile + event calendar all
+    # auto-tick when their upstream data is available.
     if pcr_auto and pcr_ok: auto_score += 1
     if mp_auto and mp_ok: auto_score += 1
+    if oi_walls_auto and oi_walls_ok: auto_score += 1
+    if iv_auto and iv_ok: auto_score += 1
+    if ev_auto and ev_ok: auto_score += 1
     auto_total = auto_score
-    # Base 6 items; +2 more when Kite provides live PCR + Max Pain
-    auto_score_max = 6 + (2 if (pcr_auto and mp_auto) else 0)
+    # Base 6 items; +1 each for the auto-tickable items whose data is present
+    auto_score_max = 6
+    if pcr_auto:      auto_score_max += 1
+    if mp_auto:       auto_score_max += 1
+    if oi_walls_auto: auto_score_max += 1
+    if iv_auto:       auto_score_max += 1
+    if ev_auto:       auto_score_max += 1
 
     return {
         "ok": True,
@@ -914,9 +1213,11 @@ def build_tef_score():
              "detail":pcr_detail},
             {"id":"maxpain",    "step":8, "auto":mp_auto, "ok":mp_ok,
              "detail":mp_detail},
-            {"id":"iv",         "step":9, "auto":False, "ok":None, "detail":"Verify IV Percentile > 50 on Sensibull"},
-            {"id":"no_event",   "step":10,"auto":False, "ok":None, "detail":"Confirm no RBI/Fed/Budget/results in next 3 days"},
-            {"id":"oi_walls",   "step":11,"auto":False, "ok":None, "detail":"Both Put + Call OI walls near CMP (both sides supported)"},
+            {"id":"iv",         "step":9, "auto":iv_auto, "ok":iv_ok, "detail":iv_detail},
+            {"id":"no_event",   "step":10,"auto":ev_auto, "ok":ev_ok,
+             "detail":ev_detail},
+            {"id":"oi_walls",   "step":11,"auto":oi_walls_auto, "ok":oi_walls_ok,
+             "detail":oi_walls_detail},
         ],
     }
 
