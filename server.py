@@ -1113,9 +1113,25 @@ def build_tef_score():
     oi_walls_detail = "Both Put + Call OI walls near CMP (both sides supported)"
     iv_detail = "Verify IV Percentile > 50 on Sensibull"
     pcr_val = None; max_pain_val = None
+    chain_error = None                         # surface Kite errors via API
     if INTRADAY and INTRADAY.enabled and hasattr(INTRADAY, "option_chain"):
         try:
             chain = INTRADAY.option_chain("NIFTY")
+            if not chain:
+                # Diagnose: was it 'no instruments', 'no expiry', or 'no strikes'?
+                try:
+                    inst = INTRADAY._nfo_instruments()
+                    n_all = len(inst)
+                    n_nifty = sum(1 for r in inst if r.get("name","").upper() == "NIFTY"
+                                                and r.get("segment") == "NFO-OPT")
+                    expiries = sorted({r["expiry"] for r in inst
+                                       if r.get("name","").upper() == "NIFTY"
+                                       and r.get("segment") == "NFO-OPT"})[:5]
+                    chain_error = (f"chain=None. NFO total={n_all}, "
+                                   f"NIFTY OPT rows={n_nifty}, "
+                                   f"first expiries={expiries}")
+                except Exception as e2:
+                    chain_error = f"chain=None + instruments fetch failed: {e2}"
             if chain:
                 pcr_val = chain.get("pcr")
                 max_pain_val = chain.get("max_pain")
@@ -1159,8 +1175,8 @@ def build_tef_score():
                         oi_walls_detail = (
                             f"Put wall @ {int(put_wall[0])} (OI {put_wall[1]:,}); "
                             f"Call wall @ {int(call_wall[0])} (OI {call_wall[1]:,})")
-        except Exception:
-            pass
+        except Exception as e:
+            chain_error = f"exception: {type(e).__name__}: {e}"
 
     # Auto-score tally (6 base items + optional 2 auto-ticked via Kite chain)
     auto_score = sum([near_ema, no_strong_trend, range_bound,
@@ -1201,6 +1217,7 @@ def build_tef_score():
         "auto_score_max": auto_score_max,
         "pcr": pcr_val,
         "max_pain": max_pain_val,
+        "chain_error": chain_error,           # None on success
         "factors": [
             {"id":"near_ema",   "step":1, "auto":True,  "ok":near_ema,  "detail":f"NIFTY {'{:+.2f}'.format(dist_pct)}% from 200 EMA"},
             {"id":"no_trend",   "step":2, "auto":True,  "ok":no_strong_trend, "detail":f"ADX {adx:.1f} · 5d slope {slope20:+.2f}%"},
