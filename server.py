@@ -494,7 +494,9 @@ def build_tradefinder(universe):
         # Needs intraday data; gracefully reports "needs intraday" otherwise.
         h1 = {"state": "needs intraday", "fired": None}
         if INTRADAY and INTRADAY.enabled:
-            bars1h = INTRADAY.get_candles(sym, "1h", days=15)
+            # Need 220+ 1H bars for the 200 EMA. ~7 mkt hours × 20 trading days = 140,
+            # so we ask for ~60 calendar days to comfortably clear the threshold.
+            bars1h = INTRADAY.get_candles(sym, "1h", days=60)
             if len(bars1h) >= 220:
                 c1 = [b["c"] for b in bars1h]
                 e1 = bt.ema(c1, 200)
@@ -848,11 +850,40 @@ def build_tef_score():
     else:
         market_type = "mixed"
 
-    # Auto-score tally (7 items we can compute; UI adds up to 3 more manually)
+    # === PCR + Max Pain from live NIFTY option chain (Kite-only) ===
+    pcr_auto = mp_auto = False
+    pcr_ok = mp_ok = None
+    pcr_detail = "Verify PCR is 0.9-1.2 on Sensibull"
+    mp_detail = "Verify Max Pain within ±100 pts of CMP"
+    pcr_val = None; max_pain_val = None
+    if INTRADAY and INTRADAY.enabled and hasattr(INTRADAY, "option_chain"):
+        try:
+            chain = INTRADAY.option_chain("NIFTY")
+            if chain:
+                pcr_val = chain.get("pcr")
+                max_pain_val = chain.get("max_pain")
+                nifty_spot = chain.get("spot") or nifty_live or 0
+                pcr_auto = True
+                pcr_ok = (pcr_val is not None) and (0.9 <= pcr_val <= 1.2)
+                pcr_detail = f"live PCR = {pcr_val}"
+                mp_auto = True
+                if max_pain_val and nifty_spot:
+                    mp_ok = abs(max_pain_val - nifty_spot) <= 100
+                    mp_detail = (f"Max Pain {int(max_pain_val)} vs CMP {int(nifty_spot)} "
+                                 f"({int(max_pain_val - nifty_spot):+d} pts)")
+        except Exception:
+            pass
+
+    # Auto-score tally (7 base items + optional 2 auto-ticked via Kite chain)
     auto_score = sum([date_ok, near_ema, no_strong_trend, range_bound,
                       small_candles, no_gap, rsi_neutral])
+    # PCR + Max Pain now auto-ticked when Kite is connected
+    if pcr_auto and pcr_ok: auto_score += 1
+    if mp_auto and mp_ok: auto_score += 1
     auto_bonus = 1 if date_best else 0            # small nudge for optimal window
     auto_total = auto_score + auto_bonus
+    # Update auto_score_max to reflect the extra 2 items when Kite is connected
+    auto_score_max = 8 + (2 if (pcr_auto and mp_auto) else 0)
 
     return {
         "ok": True,
@@ -871,7 +902,9 @@ def build_tef_score():
         "rsi": round(rsi, 1),
         "market_type": market_type,
         "auto_score": auto_total,
-        "auto_score_max": 8,               # 7 items + 1 bonus
+        "auto_score_max": auto_score_max,
+        "pcr": pcr_val,
+        "max_pain": max_pain_val,
         "factors": [
             {"id":"date",       "step":1, "auto":True,  "ok":date_ok,   "detail":f"day {dom}{' (best window)' if date_best else ''}"},
             {"id":"near_ema",   "step":2, "auto":True,  "ok":near_ema,  "detail":f"NIFTY {'{:+.2f}'.format(dist_pct)}% from 200 EMA"},
@@ -881,9 +914,11 @@ def build_tef_score():
             {"id":"no_gap",     "step":6, "auto":True,  "ok":no_gap,    "detail":f"today gap {gap_pct:.2f}%"},
             {"id":"rsi",        "step":7, "auto":True,  "ok":rsi_neutral, "detail":f"RSI {rsi:.1f}"},
             # Manual items — the UI will render them as un-ticked toggles
-            {"id":"pcr",        "step":8, "auto":False, "ok":None, "detail":"Verify PCR is 0.9-1.2 on Sensibull"},
-            {"id":"maxpain",    "step":9, "auto":False, "ok":None, "detail":"Verify Max Pain within ±100 pts of CMP"},
-            {"id":"iv",         "step":10,"auto":False, "ok":None, "detail":"Verify IV Percentile > 50"},
+            {"id":"pcr",        "step":8, "auto":pcr_auto, "ok":pcr_ok,
+             "detail":pcr_detail},
+            {"id":"maxpain",    "step":9, "auto":mp_auto, "ok":mp_ok,
+             "detail":mp_detail},
+            {"id":"iv",         "step":10,"auto":False, "ok":None, "detail":"Verify IV Percentile > 50 on Sensibull"},
             {"id":"no_event",   "step":11,"auto":False, "ok":None, "detail":"Confirm no RBI/Fed/Budget/results in next 3 days"},
             {"id":"oi_walls",   "step":12,"auto":False, "ok":None, "detail":"Both Put + Call OI walls near CMP (both sides supported)"},
         ],

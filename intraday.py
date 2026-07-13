@@ -228,6 +228,175 @@ class KiteProvider(IntradayProvider):
         self._candle_cache[cache_key] = (time.time(), bars)
         return bars
 
+    # ── Option-chain support (for TEF-90 auto-tick) ─────────────────────
+    _NFO_CACHE = None
+    _NFO_AT = 0.0
+
+    def _nfo_instruments(self):
+        """Parse Kite's NFO instrument CSV. Cached for 24h.
+        Returns list of dicts: {token, tradingsymbol, name, expiry, strike,
+                                lot_size, instrument_type, segment}."""
+        if self._NFO_CACHE and (time.time() - self._NFO_AT) < 24 * 3600:
+            return self._NFO_CACHE
+        req = urllib.request.Request(self.BASE + "/instruments/NFO",
+                                     headers=self._headers())
+        with urllib.request.urlopen(req, timeout=60) as r:
+            text = r.read().decode("utf-8", "ignore")
+        lines = text.splitlines()
+        if len(lines) < 2:
+            return []
+        header = lines[0].split(",")
+        # Kite CSV: instrument_token,exchange_token,tradingsymbol,name,last_price,
+        # expiry,strike,tick_size,lot_size,instrument_type,segment,exchange
+        rows = []
+        for line in lines[1:]:
+            p = line.split(",")
+            if len(p) < 12:
+                continue
+            try:
+                rows.append({
+                    "token": int(p[0]),
+                    "tradingsymbol": p[2].strip(),
+                    "name": p[3].strip(),
+                    "expiry": p[5].strip(),
+                    "strike": float(p[6]) if p[6] else 0,
+                    "lot_size": int(p[8]) if p[8] else 0,
+                    "instrument_type": p[9].strip(),  # CE / PE / FUT
+                    "segment": p[10].strip(),         # NFO-OPT / NFO-FUT
+                })
+            except (ValueError, IndexError):
+                continue
+        type(self)._NFO_CACHE = rows
+        type(self)._NFO_AT = time.time()
+        return rows
+
+    _CHAIN_CACHE = {}
+
+    def option_chain(self, underlying="NIFTY", expiry=None):
+        """Return the full option chain for the given underlying + expiry.
+        If expiry is None, uses the nearest weekly/monthly expiry.
+
+        Returns {
+          'underlying': str, 'expiry': 'YYYY-MM-DD', 'spot': float,
+          'strikes': [{
+              'strike': float,
+              'ce': {'ltp': float, 'oi': int, 'iv': float},
+              'pe': {'ltp': float, 'oi': int, 'iv': float},
+          }],
+          'total_call_oi': int, 'total_put_oi': int,
+          'pcr': float, 'max_pain': float,
+        }"""
+        cache_key = (underlying, expiry or "nearest")
+        if cache_key in self._CHAIN_CACHE:
+            t, data = self._CHAIN_CACHE[cache_key]
+            if time.time() - t < 60:                        # 1-min cache
+                return data
+
+        instruments = self._nfo_instruments()
+        # Filter to this underlying's OPTIONS only
+        opts = [r for r in instruments
+                if r["name"] == underlying.upper() and r["segment"] == "NFO-OPT"]
+        if not opts:
+            return None
+        # Pick expiry: nearest upcoming one, or the one the caller asked for
+        today = datetime.date.today().isoformat()
+        upcoming = sorted({r["expiry"] for r in opts if r["expiry"] >= today})
+        if not upcoming:
+            return None
+        target_expiry = expiry or upcoming[0]
+        opts = [r for r in opts if r["expiry"] == target_expiry]
+        if not opts:
+            return None
+
+        # Group into strikes {strike: {'CE': token, 'PE': token}}
+        by_strike = {}
+        for r in opts:
+            slot = by_strike.setdefault(r["strike"], {})
+            slot[r["instrument_type"]] = r
+        strikes_sorted = sorted(by_strike.keys())
+
+        # Kite's /quote endpoint takes up to 500 instruments per call.
+        # Trim to a sensible window around ATM (need spot first, which we
+        # derive from any liquid contract's underlying_value).
+        # Trick: call /quote for the ATM-ish middle 30 strikes; that gives
+        # us the spot from every payload plus full OI/IV. Then widen if needed.
+        all_tokens = []
+        for s in strikes_sorted:
+            for it in ("CE", "PE"):
+                if it in by_strike[s]:
+                    all_tokens.append(by_strike[s][it]["token"])
+        # Kite's /quote query param is 'i' repeated. Batch 400 at a time.
+        quotes = {}
+        for i in range(0, len(all_tokens), 400):
+            batch = all_tokens[i:i + 400]
+            qs = "&".join(f"i={t}" for t in batch)
+            try:
+                d = self._get(f"/quote?{qs}")
+            except Exception:
+                continue
+            quotes.update((d.get("data") or {}))
+
+        # Assemble the chain
+        strike_rows = []
+        total_ce_oi = 0
+        total_pe_oi = 0
+        spot = 0.0
+        for s in strikes_sorted:
+            slot = by_strike[s]
+            row = {"strike": s, "ce": None, "pe": None}
+            for it in ("CE", "PE"):
+                if it not in slot:
+                    continue
+                q = quotes.get(str(slot[it]["token"])) or \
+                    quotes.get(f"NFO:{slot[it]['tradingsymbol']}")
+                if not q:
+                    continue
+                spot = spot or float(q.get("underlying_value") or 0)
+                oi = int(q.get("oi") or 0)
+                ltp = float(q.get("last_price") or 0)
+                iv = (q.get("ohlc", {}).get("iv") or 0)  # Kite includes iv in some responses
+                data = {"ltp": ltp, "oi": oi, "iv": float(iv or 0)}
+                if it == "CE":
+                    row["ce"] = data
+                    total_ce_oi += oi
+                else:
+                    row["pe"] = data
+                    total_pe_oi += oi
+            if row["ce"] or row["pe"]:
+                strike_rows.append(row)
+
+        # PCR (put-call ratio) — total put OI / total call OI
+        pcr = (total_pe_oi / total_ce_oi) if total_ce_oi > 0 else 0.0
+
+        # Max Pain — strike at which OPTION WRITERS collectively lose the least.
+        # For each candidate expiry price K*, total pain = sum over all strikes S of
+        #   Call OI at S * max(K* - S, 0)   +   Put OI at S * max(S - K*, 0)
+        # Max Pain = K* that MINIMIZES that total. We evaluate at each listed strike.
+        def total_pain_at(kstar):
+            pain = 0.0
+            for r in strike_rows:
+                s = r["strike"]
+                ce_oi = (r["ce"] or {}).get("oi", 0)
+                pe_oi = (r["pe"] or {}).get("oi", 0)
+                pain += ce_oi * max(kstar - s, 0)
+                pain += pe_oi * max(s - kstar, 0)
+            return pain
+        candidates = [(s, total_pain_at(s)) for s in strikes_sorted]
+        max_pain = min(candidates, key=lambda x: x[1])[0] if candidates else 0.0
+
+        data = {
+            "underlying": underlying.upper(),
+            "expiry": target_expiry,
+            "spot": spot,
+            "strikes": strike_rows,
+            "total_call_oi": total_ce_oi,
+            "total_put_oi": total_pe_oi,
+            "pcr": round(pcr, 3),
+            "max_pain": max_pain,
+        }
+        self._CHAIN_CACHE[cache_key] = (time.time(), data)
+        return data
+
 
 # ── Factory ──────────────────────────────────────────────────────────
 def make_provider():
