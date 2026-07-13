@@ -233,7 +233,8 @@ class KiteProvider(IntradayProvider):
     _NFO_AT = 0.0
 
     def _nfo_instruments(self):
-        """Parse Kite's NFO instrument CSV. Cached for 24h.
+        """Parse Kite's NFO instrument CSV. Cached for 24h. Uses csv.reader so
+        quoted commas in the 'name' field don't miscount columns.
         Returns list of dicts: {token, tradingsymbol, name, expiry, strike,
                                 lot_size, instrument_type, segment}."""
         if self._NFO_CACHE and (time.time() - self._NFO_AT) < 24 * 3600:
@@ -242,27 +243,32 @@ class KiteProvider(IntradayProvider):
                                      headers=self._headers())
         with urllib.request.urlopen(req, timeout=60) as r:
             text = r.read().decode("utf-8", "ignore")
-        lines = text.splitlines()
-        if len(lines) < 2:
+        import csv as _csv
+        import io as _io
+        reader = _csv.reader(_io.StringIO(text))
+        header = next(reader, None)
+        if not header:
             return []
-        header = lines[0].split(",")
-        # Kite CSV: instrument_token,exchange_token,tradingsymbol,name,last_price,
-        # expiry,strike,tick_size,lot_size,instrument_type,segment,exchange
+        # Map column names → index so we're robust to Kite adding new columns
+        idx = {name.strip().lower(): i for i, name in enumerate(header)}
+        need = ("instrument_token", "tradingsymbol", "name", "expiry",
+                "strike", "lot_size", "instrument_type", "segment")
+        if not all(k in idx for k in need):
+            return []
         rows = []
-        for line in lines[1:]:
-            p = line.split(",")
-            if len(p) < 12:
+        for p in reader:
+            if len(p) < len(header):
                 continue
             try:
                 rows.append({
-                    "token": int(p[0]),
-                    "tradingsymbol": p[2].strip(),
-                    "name": p[3].strip(),
-                    "expiry": p[5].strip(),
-                    "strike": float(p[6]) if p[6] else 0,
-                    "lot_size": int(p[8]) if p[8] else 0,
-                    "instrument_type": p[9].strip(),  # CE / PE / FUT
-                    "segment": p[10].strip(),         # NFO-OPT / NFO-FUT
+                    "token": int(p[idx["instrument_token"]]),
+                    "tradingsymbol": p[idx["tradingsymbol"]].strip(),
+                    "name": p[idx["name"]].strip(),
+                    "expiry": p[idx["expiry"]].strip(),
+                    "strike": float(p[idx["strike"]]) if p[idx["strike"]] else 0,
+                    "lot_size": int(p[idx["lot_size"]]) if p[idx["lot_size"]] else 0,
+                    "instrument_type": p[idx["instrument_type"]].strip(),
+                    "segment": p[idx["segment"]].strip(),
                 })
             except (ValueError, IndexError):
                 continue

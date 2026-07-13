@@ -1154,18 +1154,33 @@ def build_tef_score():
         try:
             chain = INTRADAY.option_chain("NIFTY")
             if not chain:
-                # Diagnose: was it 'no instruments', 'no expiry', or 'no strikes'?
+                # Rich diagnostic: what names + segments are ACTUALLY in the CSV,
+                # so we can see what value to filter on.
                 try:
                     inst = INTRADAY._nfo_instruments()
                     n_all = len(inst)
-                    n_nifty = sum(1 for r in inst if r.get("name","").upper() == "NIFTY"
-                                                and r.get("segment") == "NFO-OPT")
-                    expiries = sorted({r["expiry"] for r in inst
-                                       if r.get("name","").upper() == "NIFTY"
-                                       and r.get("segment") == "NFO-OPT"})[:5]
-                    chain_error = (f"chain=None. NFO total={n_all}, "
-                                   f"NIFTY OPT rows={n_nifty}, "
-                                   f"first expiries={expiries}")
+                    # Sample distinct name values (top 20 by frequency)
+                    from collections import Counter
+                    name_counts = Counter(r.get("name","") for r in inst)
+                    top_names = name_counts.most_common(15)
+                    segment_counts = Counter(r.get("segment","") for r in inst)
+                    # Anything that even LOOKS like NIFTY (case-insensitive contains)
+                    nifty_like = sorted({r.get("name","") for r in inst
+                                         if "NIFTY" in r.get("name","").upper()})[:10]
+                    # Sample the first row's structure so we see field mapping
+                    sample = None
+                    if inst:
+                        s = inst[0]
+                        sample = {k: str(s.get(k))[:40] for k in
+                                  ("name", "tradingsymbol", "segment",
+                                   "instrument_type", "expiry", "strike")}
+                    chain_error = {
+                        "n_total": n_all,
+                        "top_15_names": top_names,
+                        "segments": dict(segment_counts),
+                        "nifty_like_names": nifty_like,
+                        "sample_row": sample,
+                    }
                 except Exception as e2:
                     chain_error = f"chain=None + instruments fetch failed: {e2}"
             if chain:
