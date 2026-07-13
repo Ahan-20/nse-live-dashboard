@@ -157,6 +157,19 @@
   .pos-field input{background:#050a10;border:1px solid var(--border);color:#e2e8f0;padding:6px 8px;border-radius:4px;font-family:inherit;font-size:12px;text-transform:none;font-weight:400;width:100%}
   @keyframes flashAlert{0%,100%{opacity:1}50%{opacity:.4}}
   .pos-alert-flash{animation:flashAlert 1s ease-in-out 3}
+  /* Persistent Open Positions strip — visible above the tab bar on every tab */
+  #open-positions-strip:empty{display:none}
+  #open-positions-strip{background:#0a1420;border:1px solid var(--border);border-radius:6px;padding:8px 10px;margin:8px 0}
+  .op-strip-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:10px;color:var(--dim);letter-spacing:.5px;text-transform:uppercase;font-weight:700}
+  .op-strip-cards{display:flex;gap:6px;overflow-x:auto;scrollbar-width:thin}
+  .op-strip-cards::-webkit-scrollbar{height:4px}
+  .op-strip-cards::-webkit-scrollbar-thumb{background:#1a2744;border-radius:2px}
+  .op-card{flex:0 0 auto;min-width:170px;background:#050a10;border:1px solid var(--border);border-radius:5px;padding:6px 9px;cursor:pointer;transition:transform .1s}
+  .op-card:hover{transform:translateY(-1px);border-color:var(--cyan)}
+  .op-card .op-sym{font-size:11px;font-weight:700;color:#e2e8f0}
+  .op-card .op-strat{font-size:9px;letter-spacing:.3px;text-transform:uppercase;font-weight:700}
+  .op-card .op-pnl{font-size:11px;font-weight:700;margin-top:2px}
+  .op-card .op-badge{font-size:9px;font-weight:700;margin-top:2px;padding:1px 5px;border-radius:2px;display:inline-block}
 </style>
 </head>
 <body>
@@ -344,6 +357,7 @@
       <div class="badge badge-purple">NSE OPTIMIZED</div>
     </div>
   </div>
+  <div id="open-positions-strip"></div>
   <div class="code-tabs">
     <div class="tab active" onclick="showTab('main',this)">Main Scanner</div>
     <div class="tab" onclick="showTab('setup',this)">Setup Guide</div>
@@ -1680,7 +1694,52 @@ function savePositionsArr(arr){
   // Update the tab badge so the user sees position count even on other tabs
   const b = document.getElementById('pos-count-badge');
   if(b) b.textContent = arr.length ? arr.length : '';
+  renderOpenPositionsStrip();
 }
+
+// Compact positions strip that shows above the tab bar on every tab.
+// Auto-updates on every mutation and every 15s (in case P&L becomes stale).
+function renderOpenPositionsStrip(){
+  const strip = document.getElementById('open-positions-strip');
+  if(!strip) return;
+  const open = loadPositions().filter(p=>!p.closed);
+  if(!open.length){ strip.innerHTML = ''; return; }
+  const inr = n => '₹'+Math.round(Number(n)).toLocaleString('en-IN');
+  const pos = v => v>=0?'var(--green)':'var(--red)';
+  const badgeStyle = {
+    'OPEN':     {bg:'#1a2744', col:'#a0aec0', txt:'OPEN'},
+    'LOSING':   {bg:'rgba(255,179,71,.15)', col:'var(--amber)', txt:'IN RED'},
+    '50_HIT':   {bg:'rgba(0,255,157,.18)', col:'var(--green)', txt:'🎯 50%'},
+    '70_LOCK':  {bg:'rgba(0,229,255,.18)', col:'var(--cyan)',  txt:'🔒 70% LOCK'},
+    'SL_HIT':   {bg:'rgba(255,68,102,.20)', col:'var(--red)',  txt:'🚨 SL HIT'},
+  };
+  let totalPnl = 0, hasLive = false;
+  const cards = open.map(p => {
+    const def = STRATEGIES[p.strategy] || STRATEGIES.bps;
+    const st = positionState(p);
+    const totalProfit = st.profit != null ? st.profit * p.lots * p.lotSize : null;
+    if(totalProfit != null){ totalPnl += totalProfit; hasLive = true; }
+    const bm = badgeStyle[st.badge] || badgeStyle.OPEN;
+    const shortLabel = {bps:'Bull Put', bcs:'Bear Call', ss:'Strangle', ic:'Iron Condor'}[p.strategy] || p.strategy;
+    return `<div class="op-card" onclick="showTab('positions', [...document.querySelectorAll('.tab')].find(t=>t.textContent.includes('Positions')))" title="Open in Positions tab">
+      <div class="op-sym">${p.symbol}</div>
+      <div class="op-strat" style="color:${def.color}">${shortLabel}</div>
+      <div class="op-pnl" style="color:${totalProfit==null?'var(--dim)':pos(totalProfit)}">${totalProfit==null?'—':(totalProfit>=0?'+':'')+inr(totalProfit)}${st.profitPct==null?'':' ('+(st.profitPct>=0?'+':'')+st.profitPct.toFixed(0)+'%)'}</div>
+      <div class="op-badge" style="background:${bm.bg};color:${bm.col};border:1px solid ${bm.col}">${bm.txt}</div>
+    </div>`;
+  }).join('');
+  const totalDisplay = hasLive
+    ? `<span style="color:${pos(totalPnl)};font-weight:700">Total: ${totalPnl>=0?'+':''}${inr(totalPnl)}</span>`
+    : `<span style="color:var(--dim)">Update current cost on each position to see live P&L</span>`;
+  strip.innerHTML = `
+    <div class="op-strip-head">
+      <span>📊 Open Positions (${open.length})</span>
+      ${totalDisplay}
+    </div>
+    <div class="op-strip-cards">${cards}</div>`;
+}
+// Refresh every 15s in case a position is edited in another tab
+setInterval(renderOpenPositionsStrip, 15000);
 function loadAlertsSeen(){
   try { return JSON.parse(localStorage.getItem(ALERT_KEY) || '{}'); } catch(e){ return {}; }
 }
@@ -2248,6 +2307,9 @@ document.addEventListener('DOMContentLoaded', ()=>{
 
   // Initialize the strategy-specific leg inputs so the form is usable on first open
   if(document.getElementById('pos-strategy')) posStrategyChanged();
+
+  // Render the persistent Open Positions strip (empty state is a no-op)
+  renderOpenPositionsStrip();
 
   // Real live data from the local NSE proxy (server.py)
   refreshLive();
