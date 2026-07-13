@@ -207,6 +207,42 @@ def _iv_percentile(underlying="NIFTY", window_days=90):
             f"IV Percentile = {pctile:.0f}% ({n}d window; today IV {today_iv:.1f})")
 
 
+# ── Position close-out cost from live leg LTPs (kills Sensibull loop) ─
+def _compute_close_out_cost(strategy, legs):
+    """Given quoted legs (LTP each), return per-share cost to CLOSE the position.
+      bps = short PE + long PE hedge:  cost = sellPE - buyPE
+      bcs = short CE + long CE hedge:  cost = sellCE - buyCE
+      ss  = short CE + short PE:       cost = sellCE + sellPE  (buy both back)
+      ic  = 4 legs:                    cost = (sellCE-buyCE) + (sellPE-buyPE)
+    Returns None if any required leg has no LTP.
+    """
+    by_id = {l["leg_id"]: l for l in legs if "leg_id" in l}
+    if not by_id:
+        return None
+    def L(leg_id):
+        v = by_id.get(leg_id)
+        return v["ltp"] if v and v.get("ltp") is not None else None
+    try:
+        if strategy == "bps":
+            s, b = L("sell"), L("buy")
+            return round(s - b, 2) if (s is not None and b is not None) else None
+        if strategy == "bcs":
+            s, b = L("sell"), L("buy")
+            return round(s - b, 2) if (s is not None and b is not None) else None
+        if strategy == "ss":
+            c, p = L("sellce"), L("sellpe")
+            return round(c + p, 2) if (c is not None and p is not None) else None
+        if strategy == "ic":
+            sc, bc = L("sellce"), L("buyce")
+            sp, bp = L("sellpe"), L("buype")
+            if None in (sc, bc, sp, bp):
+                return None
+            return round((sc - bc) + (sp - bp), 2)
+    except Exception:
+        return None
+    return None
+
+
 # ── High-impact event calendar (auto-tick TEF-90 step 10) ───────────
 _events_cache = None
 _events_at = 0.0
@@ -1364,6 +1400,26 @@ class Handler(BaseHTTPRequestHandler):
                 rep = cached_tef_score()
             except Exception as e:
                 rep = {"ok": False, "error": str(e)}
+            return self._send(200, json.dumps(rep).encode("utf-8"), "application/json")
+        if self.path.startswith("/api/position-quote"):
+            # GET: /api/position-quote?legs=<url-encoded JSON list>&strategy=bps
+            # Frontend just URL-encodes the position's legs so we can bulk-price
+            # them and return current close-out cost. Kills the last Sensibull dep.
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            legs_raw = q.get("legs", ["[]"])[0]
+            strategy = q.get("strategy", [""])[0]
+            try:
+                legs = json.loads(legs_raw)
+                if not INTRADAY or not INTRADAY.enabled or not hasattr(INTRADAY, "quote_option_legs"):
+                    return self._send(200, json.dumps(
+                        {"ok": False, "error": "Kite not connected"}).encode(),
+                        "application/json")
+                quoted = INTRADAY.quote_option_legs(legs)
+                # Compute the strategy-specific close-out cost per share.
+                current_cost = _compute_close_out_cost(strategy, quoted)
+                rep = {"ok": True, "legs": quoted, "current_cost": current_cost}
+            except Exception as e:
+                rep = {"ok": False, "error": f"{type(e).__name__}: {e}"}
             return self._send(200, json.dumps(rep).encode("utf-8"), "application/json")
         if self.path.startswith("/api/tradefinder"):
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)

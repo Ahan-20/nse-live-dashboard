@@ -397,6 +397,58 @@ class KiteProvider(IntradayProvider):
         self._CHAIN_CACHE[cache_key] = (time.time(), data)
         return data
 
+    def quote_option_legs(self, legs):
+        """Look up live LTP for each leg spec.
+        legs = [{'symbol': 'RELIANCE', 'expiry': 'YYYY-MM-DD',
+                 'strike': float, 'type': 'CE'|'PE'}, ...]
+        Returns [{...leg, 'ltp': float|None, 'oi': int|None, 'token': int|None}, ...]"""
+        instruments = self._nfo_instruments()
+        # Index instruments by (name, expiry, strike, instrument_type) for O(1) lookup
+        by_key = {}
+        for r in instruments:
+            if r.get("segment") != "NFO-OPT":
+                continue
+            key = (r["name"].upper(), r["expiry"], round(float(r["strike"]), 2),
+                   r["instrument_type"])
+            by_key[key] = r
+
+        # Resolve tokens for each requested leg
+        want = []
+        for leg in legs:
+            key = (leg["symbol"].upper(), leg["expiry"], round(float(leg["strike"]), 2),
+                   leg["type"].upper())
+            inst = by_key.get(key)
+            want.append({**leg, "token": inst["token"] if inst else None,
+                         "tradingsymbol": inst["tradingsymbol"] if inst else None})
+        tokens = [w["token"] for w in want if w["token"]]
+        if not tokens:
+            return [{**w, "ltp": None, "oi": None} for w in want]
+
+        # Batch quote
+        quotes = {}
+        for i in range(0, len(tokens), 400):
+            batch = tokens[i:i + 400]
+            qs = "&".join(f"i={t}" for t in batch)
+            try:
+                d = self._get(f"/quote?{qs}")
+                quotes.update((d.get("data") or {}))
+            except Exception:
+                continue
+
+        # Attach LTP + OI to each leg
+        out = []
+        for w in want:
+            q = None
+            if w["token"]:
+                q = quotes.get(str(w["token"])) or \
+                    quotes.get(f"NFO:{w['tradingsymbol']}")
+            if q:
+                out.append({**w, "ltp": float(q.get("last_price") or 0),
+                            "oi":  int(q.get("oi") or 0)})
+            else:
+                out.append({**w, "ltp": None, "oi": None})
+        return out
+
 
 # ── Factory ──────────────────────────────────────────────────────────
 def make_provider():

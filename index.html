@@ -1740,6 +1740,49 @@ function renderOpenPositionsStrip(){
 }
 // Refresh every 15s in case a position is edited in another tab
 setInterval(renderOpenPositionsStrip, 15000);
+
+// ── Auto-poll Kite for live spread cost of every open position ──────
+// Replaces the manual "paste from Sensibull" step. Runs every 30s.
+let _posAutoPollInFlight = false;
+async function autoPollPositionCosts(){
+  if(_posAutoPollInFlight) return;
+  _posAutoPollInFlight = true;
+  try{
+    const arr = loadPositions().filter(p=>!p.closed);
+    if(!arr.length) return;
+    let anyChanged = false;
+    for(const p of arr){
+      if(!p.expiry) continue;    // Legs need an expiry to look up the option
+      const def = STRATEGIES[p.strategy] || STRATEGIES.bps;
+      const legs = p.legs.map(l => {
+        const meta = def.legs.find(x=>x.id===l.id);
+        return meta ? {leg_id: l.id, symbol: p.symbol, expiry: p.expiry,
+                       strike: l.strike, type: meta.opt} : null;
+      }).filter(Boolean);
+      if(legs.length !== def.legs.length) continue;
+      try{
+        const url = '/api/position-quote?strategy='+p.strategy
+          +'&legs='+encodeURIComponent(JSON.stringify(legs));
+        const r = await fetch(url, {cache:'no-store'});
+        const d = await r.json();
+        if(!d.ok || d.current_cost == null) continue;
+        // Only update if the value actually moved (avoid noise re-renders)
+        if(Math.abs((p.currentCost||0) - d.current_cost) > 0.01){
+          p.currentCost = d.current_cost;
+          p.autoQuotedAt = Date.now();
+          anyChanged = true;
+        }
+      }catch(e){/* silent — retry next tick */}
+    }
+    if(anyChanged){ savePositionsArr(arr); renderPositions(); }
+  }finally{
+    _posAutoPollInFlight = false;
+  }
+}
+// Poll every 30s. Also kick once immediately (deferred a couple sec so first
+// paint isn't blocked by an eager Kite call).
+setTimeout(autoPollPositionCosts, 3000);
+setInterval(autoPollPositionCosts, 30000);
 function loadAlertsSeen(){
   try { return JSON.parse(localStorage.getItem(ALERT_KEY) || '{}'); } catch(e){ return {}; }
 }
