@@ -1561,8 +1561,7 @@ function renderTefScore(d){
       <div style="width:22px;height:22px;border:1px solid ${okColor};border-radius:4px;display:flex;align-items:center;justify-content:center;color:${okColor};font-weight:700;font-size:12px;flex-shrink:0">${ticked?'✓':(isManual?'':'✗')}</div>
       <div style="flex:1">
         <div style="font-size:11px;color:#e2e8f0;font-weight:${ticked?'700':'400'}">Step ${f.step}. ${
-          {date:'Date filter (after 15th)',
-           near_ema:'Nifty near 200 EMA (sideways)',
+          {near_ema:'Nifty near 200 EMA (sideways)',
            no_trend:'No strong HH/HL or LH/LL trend',
            range_bound:'Range-bound (last 2-3 days)',
            small_cndl:'Small candles / consolidation',

@@ -804,10 +804,8 @@ def build_tef_score():
     # === TEF-90 factor computations ===
     today = datetime.date.today()
 
-    # 1. Date filter — best window is 18-25 (post OI-build day 15)
-    dom = today.day
-    date_ok = dom >= 15
-    date_best = 18 <= dom <= 25
+    # (Removed: Date filter. Abhishek prefers score to reflect market state only,
+    # not the calendar-based OI-build heuristic.)
 
     # 2. Sideways / Near 200 EMA: distance from 200 EMA in ATR units
     dist_pct = (cmp - e200[-1]) / e200[-1] * 100 if e200[-1] else 0
@@ -874,16 +872,15 @@ def build_tef_score():
         except Exception:
             pass
 
-    # Auto-score tally (7 base items + optional 2 auto-ticked via Kite chain)
-    auto_score = sum([date_ok, near_ema, no_strong_trend, range_bound,
+    # Auto-score tally (6 base items + optional 2 auto-ticked via Kite chain)
+    auto_score = sum([near_ema, no_strong_trend, range_bound,
                       small_candles, no_gap, rsi_neutral])
     # PCR + Max Pain now auto-ticked when Kite is connected
     if pcr_auto and pcr_ok: auto_score += 1
     if mp_auto and mp_ok: auto_score += 1
-    auto_bonus = 1 if date_best else 0            # small nudge for optimal window
-    auto_total = auto_score + auto_bonus
-    # Update auto_score_max to reflect the extra 2 items when Kite is connected
-    auto_score_max = 8 + (2 if (pcr_auto and mp_auto) else 0)
+    auto_total = auto_score
+    # Base 6 items; +2 more when Kite provides live PCR + Max Pain
+    auto_score_max = 6 + (2 if (pcr_auto and mp_auto) else 0)
 
     return {
         "ok": True,
@@ -906,21 +903,20 @@ def build_tef_score():
         "pcr": pcr_val,
         "max_pain": max_pain_val,
         "factors": [
-            {"id":"date",       "step":1, "auto":True,  "ok":date_ok,   "detail":f"day {dom}{' (best window)' if date_best else ''}"},
-            {"id":"near_ema",   "step":2, "auto":True,  "ok":near_ema,  "detail":f"NIFTY {'{:+.2f}'.format(dist_pct)}% from 200 EMA"},
-            {"id":"no_trend",   "step":3, "auto":True,  "ok":no_strong_trend, "detail":f"ADX {adx:.1f} · 5d slope {slope20:+.2f}%"},
-            {"id":"range_bound","step":4, "auto":True,  "ok":range_bound, "detail":f"avg 3-day range {avg_range:.2f} vs ATR {a[-1]:.2f}"},
-            {"id":"small_cndl", "step":5, "auto":True,  "ok":small_candles, "detail":f"median body/range {med_body:.2f} (5d)"},
-            {"id":"no_gap",     "step":6, "auto":True,  "ok":no_gap,    "detail":f"today gap {gap_pct:.2f}%"},
-            {"id":"rsi",        "step":7, "auto":True,  "ok":rsi_neutral, "detail":f"RSI {rsi:.1f}"},
+            {"id":"near_ema",   "step":1, "auto":True,  "ok":near_ema,  "detail":f"NIFTY {'{:+.2f}'.format(dist_pct)}% from 200 EMA"},
+            {"id":"no_trend",   "step":2, "auto":True,  "ok":no_strong_trend, "detail":f"ADX {adx:.1f} · 5d slope {slope20:+.2f}%"},
+            {"id":"range_bound","step":3, "auto":True,  "ok":range_bound, "detail":f"avg 3-day range {avg_range:.2f} vs ATR {a[-1]:.2f}"},
+            {"id":"small_cndl", "step":4, "auto":True,  "ok":small_candles, "detail":f"median body/range {med_body:.2f} (5d)"},
+            {"id":"no_gap",     "step":5, "auto":True,  "ok":no_gap,    "detail":f"today gap {gap_pct:.2f}%"},
+            {"id":"rsi",        "step":6, "auto":True,  "ok":rsi_neutral, "detail":f"RSI {rsi:.1f}"},
             # Manual items — the UI will render them as un-ticked toggles
-            {"id":"pcr",        "step":8, "auto":pcr_auto, "ok":pcr_ok,
+            {"id":"pcr",        "step":7, "auto":pcr_auto, "ok":pcr_ok,
              "detail":pcr_detail},
-            {"id":"maxpain",    "step":9, "auto":mp_auto, "ok":mp_ok,
+            {"id":"maxpain",    "step":8, "auto":mp_auto, "ok":mp_ok,
              "detail":mp_detail},
-            {"id":"iv",         "step":10,"auto":False, "ok":None, "detail":"Verify IV Percentile > 50 on Sensibull"},
-            {"id":"no_event",   "step":11,"auto":False, "ok":None, "detail":"Confirm no RBI/Fed/Budget/results in next 3 days"},
-            {"id":"oi_walls",   "step":12,"auto":False, "ok":None, "detail":"Both Put + Call OI walls near CMP (both sides supported)"},
+            {"id":"iv",         "step":9, "auto":False, "ok":None, "detail":"Verify IV Percentile > 50 on Sensibull"},
+            {"id":"no_event",   "step":10,"auto":False, "ok":None, "detail":"Confirm no RBI/Fed/Budget/results in next 3 days"},
+            {"id":"oi_walls",   "step":11,"auto":False, "ok":None, "detail":"Both Put + Call OI walls near CMP (both sides supported)"},
         ],
     }
 
