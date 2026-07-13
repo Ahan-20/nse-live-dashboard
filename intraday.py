@@ -150,8 +150,17 @@ class KiteProvider(IntradayProvider):
 
     def _get(self, path, timeout=15):
         req = urllib.request.Request(self.BASE + path, headers=self._headers())
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read().decode("utf-8"))
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            # Include Kite's actual error body so we can see WHY it 400'd
+            try:
+                body = e.read().decode("utf-8", "ignore")[:400]
+            except Exception:
+                body = "<unreadable>"
+            raise RuntimeError(f"HTTP {e.code} {e.reason} on {path[:80]} · "
+                               f"kite says: {body}") from e
 
     def _instrument_token(self, symbol):
         """Look up NSE:SYMBOL-EQ's instrument_token. Cached for 24h."""
