@@ -1425,6 +1425,26 @@ class Handler(BaseHTTPRequestHandler):
                     b"<a style='color:#00e5ff' href='/kite/login'>/kite/login</a> then.</p>"
                     b"</body></html>")
             return self._send(200, html, "text/html; charset=utf-8")
+        if self.path.startswith("/api/tef-picks"):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            strat = (q.get("strategy", ["ic"])[0] or "ic").lower()
+            if strat not in ("ic", "ss"):
+                return self._send(200,
+                    json.dumps({"ok": False, "error": f"unsupported strategy '{strat}'"}).encode(),
+                    "application/json")
+            if not INTRADAY or not INTRADAY.enabled or not hasattr(INTRADAY, "strategy_picks"):
+                return self._send(200,
+                    json.dumps({"ok": False, "error": "Kite not connected"}).encode(),
+                    "application/json")
+            try:
+                picks = INTRADAY.strategy_picks("NIFTY", strat)
+                if not picks:
+                    rep = {"ok": False, "error": "option chain unavailable"}
+                else:
+                    rep = {"ok": True, "picks": picks}
+            except Exception as e:
+                rep = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+            return self._send(200, json.dumps(rep).encode("utf-8"), "application/json")
         if self.path.startswith("/api/tef-score"):
             try:
                 rep = cached_tef_score()

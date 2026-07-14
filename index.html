@@ -1509,6 +1509,104 @@ function tefToggleManual(id){
   renderTefScore(_tefData);
 }
 
+// TEF-90 → auto-fetch the exact strikes for NIFTY-based strategies (SS/IC).
+// Renders below the "Recommended Strategy" card with a "Log this trade →" button
+// that pre-fills the Positions form.
+async function fetchAndRenderTefPicks(strategyCode){
+  const slot = document.getElementById('tef-picks-slot');
+  if(!slot) return;
+  // Map TEF-90 route codes → intraday.py strategy codes
+  const map = {'SHORT_STRANGLE': 'ss', 'IRON_CONDOR': 'ic'};
+  const s = map[strategyCode];
+  if(!s){                        // BPS / BCS / SKIP live on other tabs
+    if(strategyCode === 'BULL_PUT_SPREAD' || strategyCode === 'BEAR_CALL_SPREAD'){
+      slot.innerHTML = `<div style="font-size:10px;color:var(--dim);margin-top:4px">
+        → Directional picks are per-stock. Open the
+        <b style="color:var(--cyan)">Bull Put Setup</b> or
+        <b style="color:var(--cyan)">Trade Finder</b> tab for candidates.</div>`;
+    } else {
+      slot.innerHTML = '';
+    }
+    return;
+  }
+  slot.innerHTML = `<div style="font-size:10px;color:var(--dim)">Loading strikes from Kite…</div>`;
+  try{
+    const r = await fetch('/api/tef-picks?strategy='+s, {cache:'no-store'});
+    const d = await r.json();
+    if(!d.ok){
+      slot.innerHTML = `<div style="font-size:10px;color:var(--amber)">
+        No picks: ${d.error||'unknown'}. ${d.error==='Kite not connected'
+          ? 'Visit <a style="color:var(--cyan)" href="/kite/login">/kite/login</a>.' : ''}</div>`;
+      return;
+    }
+    slot.innerHTML = renderTefPicks(d.picks);
+  }catch(e){
+    slot.innerHTML = `<div style="font-size:10px;color:var(--amber)">Pick fetch error: ${e.message}</div>`;
+  }
+}
+
+function renderTefPicks(p){
+  const legRow = leg => {
+    const sideCol = leg.side === 'sell' ? 'var(--red)' : 'var(--green)';
+    return `<tr>
+      <td style="color:${sideCol};font-weight:700;font-size:10px;text-transform:uppercase">${leg.side}</td>
+      <td style="color:#e2e8f0;font-weight:700">${leg.strike} ${leg.type}</td>
+      <td style="text-align:right;color:#a0aec0">₹${leg.ltp}</td>
+    </tr>`;
+  };
+  const legs = (p.legs || []).map(legRow).join('');
+  // Compute credit/loss displayed in ₹ per share
+  const lossTxt = p.max_loss == null
+    ? `<b style="color:var(--red)">Undefined ⚠</b> (SL @ close-out cost = ₹${p.sl_at_close_out_cost})`
+    : `<b style="color:var(--red)">₹${p.max_loss}</b>`;
+  return `
+    <div style="border-top:1px dashed var(--border);margin-top:8px;padding-top:8px">
+      <div style="font-size:9px;color:var(--dim);letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px">
+        Suggested strikes · expiry ${p.expiry} (${p.days_to_expiry} d) · spot ${p.spot}
+      </div>
+      <table style="width:100%;font-size:11px;border-collapse:collapse">
+        ${legs}
+      </table>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px;font-size:10px;color:#a0aec0">
+        <div><span style="color:var(--dim)">Net credit:</span> <b style="color:var(--green)">₹${p.net_credit}</b></div>
+        <div><span style="color:var(--dim)">Max loss:</span> ${lossTxt}</div>
+        <div><span style="color:var(--dim)">Break-even ↓:</span> <b>${p.be_low}</b></div>
+        <div><span style="color:var(--dim)">Break-even ↑:</span> <b>${p.be_high}</b></div>
+      </div>
+      <button onclick='logTefPickToPositions(${JSON.stringify(p).replace(/'/g,"&apos;")})'
+        style="margin-top:8px;background:var(--purple);color:#050a10;border:none;padding:6px 12px;border-radius:4px;
+               font-weight:700;cursor:pointer;font-family:inherit;font-size:10px;letter-spacing:.5px">
+        📊 LOG THIS TRADE →
+      </button>
+      <div style="font-size:9px;color:var(--dim);margin-top:6px">
+        Kite auto-suggested using Δ 0.15–0.20 (${p.days_to_expiry<=7?'~3%':'~4.5%'} OTM). Verify strikes in Kite before placing.
+      </div>
+    </div>`;
+}
+
+// Pre-fill the Positions form with a TEF-90 pick and jump there.
+function logTefPickToPositions(p){
+  const posTab = [...document.querySelectorAll('.tab')].find(t=>t.textContent.includes('Positions'));
+  showTab('positions', posTab);
+  const g = id => document.getElementById(id);
+  const wrap = g('pos-form-wrap'); if(wrap) wrap.open = true;
+  g('pos-strategy').value = p.strategy;
+  posStrategyChanged();
+  g('pos-symbol').value = 'NIFTY';
+  g('pos-expiry').value = p.expiry;
+  g('pos-credit').value = p.net_credit;
+  // NIFTY lot size (as of 2026) is 75. Auto-fill; user can adjust.
+  g('pos-lotsize').value = 75;
+  g('pos-entry').value = new Date().toISOString().slice(0,10);
+  for(const leg of p.legs){
+    const el = g('pos-leg-'+leg.leg_id);
+    if(el) el.value = leg.strike;
+  }
+  g('pos-form-status').textContent =
+    'Strikes pre-filled from TEF-90. Confirm your actual filled prices before saving.';
+  g('pos-form-status').style.color = 'var(--cyan)';
+}
+
 async function runTefScore(){
   try{
     const r = await fetch('/api/tef-score', {cache:'no-store'});
@@ -1580,8 +1678,11 @@ function renderTefScore(d){
         <div style="font-size:20px;font-weight:700;color:${strategyMeta.color};margin-top:4px">${strategyMeta.emoji} ${strategyMeta.label}${route.size==='half'?' <span style="font-size:11px;color:var(--amber)">(HALF SIZE)</span>':''}</div>
         <div style="font-size:10px;color:#a0aec0;margin-top:6px;line-height:1.4">${strategyMeta.hint}</div>
         <div style="font-size:9px;color:var(--dim);margin-top:6px">${route.reason}</div>
+        <div id="tef-picks-slot" style="margin-top:10px"></div>
       </div>
     </div>`;
+  // Kick off strike-pick fetch for NIFTY-based strategies (SS / IC)
+  setTimeout(()=>fetchAndRenderTefPicks(route.strategy), 100);
 
   // Market state snapshot
   const stateRow = `<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px;padding:10px 12px;background:#0a1420;border:1px solid var(--border);border-radius:6px;font-size:11px">

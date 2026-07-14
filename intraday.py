@@ -419,6 +419,104 @@ class KiteProvider(IntradayProvider):
         self._CHAIN_CACHE[cache_key] = (time.time(), data)
         return data
 
+    def strategy_picks(self, underlying, strategy, expiry=None):
+        """Pick exact strikes for a strategy from the live option chain.
+        Returns {expiry, spot, legs, net_credit, max_loss, be_low, be_high}
+        or None if data unavailable.
+
+        Δ target: 0.15-0.20 for sells (Abhishek's TEF-90 spec). We approximate
+        via OTM% since Kite's /quote doesn't reliably return IV — for weekly
+        expiries, Δ 0.15-0.20 sits at ~3-4% OTM; monthlies at ~4-5% OTM.
+        """
+        chain = self.option_chain(underlying, expiry)
+        if not chain or not chain.get("strikes"):
+            return None
+        spot = chain.get("spot") or 0
+        if not spot:
+            return None
+        strikes = chain["strikes"]
+
+        # How OTM the sell strikes should be (Δ 0.15-0.20 band).
+        # Nearest-expiry weekly is tighter than monthly.
+        exp_iso = chain["expiry"]
+        try:
+            days_out = (datetime.date.fromisoformat(exp_iso) - datetime.date.today()).days
+        except Exception:
+            days_out = 7
+        sell_otm_pct = 3.0 if days_out <= 7 else 4.5
+        hedge_gap_pct = 1.0                    # Iron Condor: hedge 1% further OTM
+
+        def _closest(target_strike, side):
+            """Nearest strike with a liquid option on that side."""
+            side_key = side.lower()
+            cand = [r for r in strikes if r.get(side_key) and (r[side_key].get("ltp") or 0) > 0]
+            if not cand: return None
+            return min(cand, key=lambda r: abs(r["strike"] - target_strike))
+
+        def _tgt_ce(pct): return spot * (1 + pct / 100)
+        def _tgt_pe(pct): return spot * (1 - pct / 100)
+
+        if strategy == "ss":                    # SHORT STRANGLE (2 legs, undefined risk)
+            sell_ce = _closest(_tgt_ce(sell_otm_pct), "CE")
+            sell_pe = _closest(_tgt_pe(sell_otm_pct), "PE")
+            if not (sell_ce and sell_pe):
+                return None
+            credit = round(sell_ce["ce"]["ltp"] + sell_pe["pe"]["ltp"], 2)
+            return {
+                "strategy": "ss", "expiry": exp_iso, "spot": spot,
+                "legs": [
+                    {"leg_id": "sellce", "strike": sell_ce["strike"],
+                     "ltp": sell_ce["ce"]["ltp"], "type": "CE", "side": "sell"},
+                    {"leg_id": "sellpe", "strike": sell_pe["strike"],
+                     "ltp": sell_pe["pe"]["ltp"], "type": "PE", "side": "sell"},
+                ],
+                "net_credit": credit,
+                "max_loss": None,                # undefined risk
+                "sl_at_close_out_cost": round(credit * 2, 2),
+                "be_low":  round(sell_pe["strike"] - credit, 2),
+                "be_high": round(sell_ce["strike"] + credit, 2),
+                "days_to_expiry": days_out,
+            }
+
+        if strategy == "ic":                    # IRON CONDOR (4 legs, defined risk)
+            sell_ce = _closest(_tgt_ce(sell_otm_pct), "CE")
+            buy_ce  = _closest(_tgt_ce(sell_otm_pct + hedge_gap_pct), "CE")
+            sell_pe = _closest(_tgt_pe(sell_otm_pct), "PE")
+            buy_pe  = _closest(_tgt_pe(sell_otm_pct + hedge_gap_pct), "PE")
+            if not all([sell_ce, buy_ce, sell_pe, buy_pe]):
+                return None
+            # Ensure hedges are actually FURTHER out (not the same strike)
+            if buy_ce["strike"] <= sell_ce["strike"] or buy_pe["strike"] >= sell_pe["strike"]:
+                return None
+            ce_credit = sell_ce["ce"]["ltp"] - buy_ce["ce"]["ltp"]
+            pe_credit = sell_pe["pe"]["ltp"] - buy_pe["pe"]["ltp"]
+            credit = round(ce_credit + pe_credit, 2)
+            ce_width = buy_ce["strike"] - sell_ce["strike"]
+            pe_width = sell_pe["strike"] - buy_pe["strike"]
+            max_width = max(ce_width, pe_width)
+            return {
+                "strategy": "ic", "expiry": exp_iso, "spot": spot,
+                "legs": [
+                    {"leg_id": "sellce", "strike": sell_ce["strike"],
+                     "ltp": sell_ce["ce"]["ltp"], "type": "CE", "side": "sell"},
+                    {"leg_id": "buyce",  "strike": buy_ce["strike"],
+                     "ltp": buy_ce["ce"]["ltp"],  "type": "CE", "side": "buy"},
+                    {"leg_id": "sellpe", "strike": sell_pe["strike"],
+                     "ltp": sell_pe["pe"]["ltp"], "type": "PE", "side": "sell"},
+                    {"leg_id": "buype",  "strike": buy_pe["strike"],
+                     "ltp": buy_pe["pe"]["ltp"],  "type": "PE", "side": "buy"},
+                ],
+                "net_credit": credit,
+                "max_loss": round(max_width - credit, 2),
+                "ce_wing_width": ce_width,
+                "pe_wing_width": pe_width,
+                "be_low":  round(sell_pe["strike"] - credit, 2),
+                "be_high": round(sell_ce["strike"] + credit, 2),
+                "days_to_expiry": days_out,
+            }
+
+        return None                              # BPS/BCS live on Bull Put Setup / Trade Finder
+
     def quote_option_legs(self, legs):
         """Look up live LTP for each leg spec.
         legs = [{'symbol': 'RELIANCE', 'expiry': 'YYYY-MM-DD',
