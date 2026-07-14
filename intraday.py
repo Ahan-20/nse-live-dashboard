@@ -419,21 +419,37 @@ class KiteProvider(IntradayProvider):
         self._CHAIN_CACHE[cache_key] = (time.time(), data)
         return data
 
-    def strategy_picks(self, underlying, strategy, expiry=None):
+    def strategy_picks(self, underlying, strategy, expiry=None, spot_override=None):
         """Pick exact strikes for a strategy from the live option chain.
         Returns {expiry, spot, legs, net_credit, max_loss, be_low, be_high}
-        or None if data unavailable.
+        on success, or {"error": <reason>} so the UI can show what went wrong.
 
         Δ target: 0.15-0.20 for sells (Abhishek's TEF-90 spec). We approximate
         via OTM% since Kite's /quote doesn't reliably return IV — for weekly
         expiries, Δ 0.15-0.20 sits at ~3-4% OTM; monthlies at ~4-5% OTM.
+
+        `spot_override` lets the caller pass a known-good spot (e.g. from NSE
+        allIndices) when Kite's underlying_value field is 0/missing.
         """
         chain = self.option_chain(underlying, expiry)
-        if not chain or not chain.get("strikes"):
-            return None
-        spot = chain.get("spot") or 0
+        if not chain:
+            return {"error": "option_chain returned None"}
+        if not chain.get("strikes"):
+            return {"error": f"chain had no strikes for {underlying}"}
+        # Prefer explicit override; then chain-provided spot; then a
+        # last-resort estimate from the strike whose |CE-PE| is smallest
+        # (put-call-parity approximation of the synthetic future = spot).
+        spot = spot_override or chain.get("spot") or 0
         if not spot:
-            return None
+            balanced = [(r["strike"], abs((r["ce"] or {}).get("ltp", 0) - (r["pe"] or {}).get("ltp", 0)))
+                        for r in chain["strikes"]
+                        if r.get("ce") and r.get("pe")
+                        and (r["ce"].get("ltp") or 0) > 0 and (r["pe"].get("ltp") or 0) > 0]
+            if balanced:
+                spot = min(balanced, key=lambda x: x[1])[0]
+        if not spot:
+            return {"error": "no usable spot (Kite underlying_value missing "
+                             "and no strike with both CE+PE LTP)"}
         strikes = chain["strikes"]
 
         # How OTM the sell strikes should be (Δ 0.15-0.20 band).
@@ -447,28 +463,44 @@ class KiteProvider(IntradayProvider):
         hedge_gap_pct = 1.0                    # Iron Condor: hedge 1% further OTM
 
         def _closest(target_strike, side):
-            """Nearest strike with a liquid option on that side."""
+            """Nearest strike with a liquid option on that side.
+            Liquidity signal = LTP > 0 OR OI > 10k (covers far-OTM strikes that
+            have deep OI but haven't traded in the last few minutes)."""
             side_key = side.lower()
-            cand = [r for r in strikes if r.get(side_key) and (r[side_key].get("ltp") or 0) > 0]
+            cand = []
+            for r in strikes:
+                d = r.get(side_key)
+                if not d: continue
+                ltp = d.get("ltp") or 0
+                oi = d.get("oi") or 0
+                if ltp > 0 or oi > 10000:
+                    cand.append(r)
             if not cand: return None
             return min(cand, key=lambda r: abs(r["strike"] - target_strike))
 
         def _tgt_ce(pct): return spot * (1 + pct / 100)
         def _tgt_pe(pct): return spot * (1 - pct / 100)
 
+        # Small helper: use LTP if positive, else 0.5*(bid+ask) approx via OI-weighted mid
+        def _ltp_of(strike_row, side):
+            d = strike_row.get(side.lower()) or {}
+            return d.get("ltp") or 0
+
         if strategy == "ss":                    # SHORT STRANGLE (2 legs, undefined risk)
             sell_ce = _closest(_tgt_ce(sell_otm_pct), "CE")
             sell_pe = _closest(_tgt_pe(sell_otm_pct), "PE")
-            if not (sell_ce and sell_pe):
-                return None
-            credit = round(sell_ce["ce"]["ltp"] + sell_pe["pe"]["ltp"], 2)
+            if not sell_ce:
+                return {"error": f"no liquid CE near {int(_tgt_ce(sell_otm_pct))} (targeted Δ 0.15-0.20)"}
+            if not sell_pe:
+                return {"error": f"no liquid PE near {int(_tgt_pe(sell_otm_pct))} (targeted Δ 0.15-0.20)"}
+            credit = round(_ltp_of(sell_ce, "CE") + _ltp_of(sell_pe, "PE"), 2)
             return {
                 "strategy": "ss", "expiry": exp_iso, "spot": spot,
                 "legs": [
                     {"leg_id": "sellce", "strike": sell_ce["strike"],
-                     "ltp": sell_ce["ce"]["ltp"], "type": "CE", "side": "sell"},
+                     "ltp": _ltp_of(sell_ce, "CE"), "type": "CE", "side": "sell"},
                     {"leg_id": "sellpe", "strike": sell_pe["strike"],
-                     "ltp": sell_pe["pe"]["ltp"], "type": "PE", "side": "sell"},
+                     "ltp": _ltp_of(sell_pe, "PE"), "type": "PE", "side": "sell"},
                 ],
                 "net_credit": credit,
                 "max_loss": None,                # undefined risk
@@ -483,13 +515,20 @@ class KiteProvider(IntradayProvider):
             buy_ce  = _closest(_tgt_ce(sell_otm_pct + hedge_gap_pct), "CE")
             sell_pe = _closest(_tgt_pe(sell_otm_pct), "PE")
             buy_pe  = _closest(_tgt_pe(sell_otm_pct + hedge_gap_pct), "PE")
-            if not all([sell_ce, buy_ce, sell_pe, buy_pe]):
-                return None
-            # Ensure hedges are actually FURTHER out (not the same strike)
-            if buy_ce["strike"] <= sell_ce["strike"] or buy_pe["strike"] >= sell_pe["strike"]:
-                return None
-            ce_credit = sell_ce["ce"]["ltp"] - buy_ce["ce"]["ltp"]
-            pe_credit = sell_pe["pe"]["ltp"] - buy_pe["pe"]["ltp"]
+            missing = []
+            if not sell_ce: missing.append(f"sell CE near {int(_tgt_ce(sell_otm_pct))}")
+            if not buy_ce:  missing.append(f"buy CE near {int(_tgt_ce(sell_otm_pct+hedge_gap_pct))}")
+            if not sell_pe: missing.append(f"sell PE near {int(_tgt_pe(sell_otm_pct))}")
+            if not buy_pe:  missing.append(f"buy PE near {int(_tgt_pe(sell_otm_pct+hedge_gap_pct))}")
+            if missing:
+                return {"error": "no liquid strikes for: " + ", ".join(missing)}
+            # Ensure hedges are actually FURTHER out than sells
+            if buy_ce["strike"] <= sell_ce["strike"]:
+                return {"error": f"CE hedge {int(buy_ce['strike'])} not above sell {int(sell_ce['strike'])}"}
+            if buy_pe["strike"] >= sell_pe["strike"]:
+                return {"error": f"PE hedge {int(buy_pe['strike'])} not below sell {int(sell_pe['strike'])}"}
+            ce_credit = _ltp_of(sell_ce, "CE") - _ltp_of(buy_ce, "CE")
+            pe_credit = _ltp_of(sell_pe, "PE") - _ltp_of(buy_pe, "PE")
             credit = round(ce_credit + pe_credit, 2)
             ce_width = buy_ce["strike"] - sell_ce["strike"]
             pe_width = sell_pe["strike"] - buy_pe["strike"]
@@ -498,13 +537,13 @@ class KiteProvider(IntradayProvider):
                 "strategy": "ic", "expiry": exp_iso, "spot": spot,
                 "legs": [
                     {"leg_id": "sellce", "strike": sell_ce["strike"],
-                     "ltp": sell_ce["ce"]["ltp"], "type": "CE", "side": "sell"},
+                     "ltp": _ltp_of(sell_ce, "CE"), "type": "CE", "side": "sell"},
                     {"leg_id": "buyce",  "strike": buy_ce["strike"],
-                     "ltp": buy_ce["ce"]["ltp"],  "type": "CE", "side": "buy"},
+                     "ltp": _ltp_of(buy_ce, "CE"),  "type": "CE", "side": "buy"},
                     {"leg_id": "sellpe", "strike": sell_pe["strike"],
-                     "ltp": sell_pe["pe"]["ltp"], "type": "PE", "side": "sell"},
+                     "ltp": _ltp_of(sell_pe, "PE"), "type": "PE", "side": "sell"},
                     {"leg_id": "buype",  "strike": buy_pe["strike"],
-                     "ltp": buy_pe["pe"]["ltp"],  "type": "PE", "side": "buy"},
+                     "ltp": _ltp_of(buy_pe, "PE"),  "type": "PE", "side": "buy"},
                 ],
                 "net_credit": credit,
                 "max_loss": round(max_width - credit, 2),

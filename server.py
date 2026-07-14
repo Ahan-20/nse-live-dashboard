@@ -1437,9 +1437,22 @@ class Handler(BaseHTTPRequestHandler):
                     json.dumps({"ok": False, "error": "Kite not connected"}).encode(),
                     "application/json")
             try:
-                picks = INTRADAY.strategy_picks("NIFTY", strat)
+                # Pass NIFTY spot from allIndices so we don't depend on Kite's
+                # underlying_value field (which is sometimes missing).
+                spot_override = None
+                try:
+                    ai = nse_get("/api/allIndices")
+                    row = next((r for r in ai.get("data", []) if r.get("index") == "NIFTY 50"), None)
+                    if row: spot_override = float(row.get("last") or 0)
+                except Exception:
+                    pass
+                picks = INTRADAY.strategy_picks("NIFTY", strat, spot_override=spot_override)
+                # New: picks is either a full picks dict (has 'legs') or an
+                # {error: reason} dict — pass either through so UI can show it.
                 if not picks:
                     rep = {"ok": False, "error": "option chain unavailable"}
+                elif isinstance(picks, dict) and "error" in picks and "legs" not in picks:
+                    rep = {"ok": False, "error": picks["error"]}
                 else:
                     rep = {"ok": True, "picks": picks}
             except Exception as e:
