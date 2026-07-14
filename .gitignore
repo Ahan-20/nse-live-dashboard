@@ -2,6 +2,7 @@
 # The deployed app ships the slim prices_web.db (top-500 liquid names) instead.
 prices.db
 iv_history.db
+.kite_token
 
 # Local credentials — Groww API key + TOTP secret. NEVER commit.
 .env

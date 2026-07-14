@@ -350,29 +350,44 @@ def _kite_exchange_request_token(request_token):
     return tok
 
 
+# Kite access-token store lives inside the app dir so the service user can
+# actually write it. systemd's ProtectSystem=strict + ReadWritePaths=$APP_DIR
+# allows this; /etc/... would fail silently.
+KITE_TOKEN_FILE = os.path.join(HERE, ".kite_token")
+
+
 def _persist_kite_access_token(token):
-    """Write the new access_token into /etc/nse-live-dashboard/env so the
-    service picks it up on restart. In-memory os.environ is also updated by
-    the caller. If the env file doesn't exist (e.g. running locally), skip."""
-    env_file = "/etc/nse-live-dashboard/env"
-    if not os.path.exists(env_file):
-        # Local dev: also try repo-root .env
-        alt = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-        env_file = alt if os.path.exists(alt) else None
-    if not env_file:
-        return
+    """Save the fresh access_token so it survives a service restart.
+    Writes to $APP_DIR/.kite_token (nselive user can write); also updates the
+    in-memory env for the currently-running worker."""
+    os.environ["KITE_ACCESS_TOKEN"] = token
     try:
-        with open(env_file) as f:
-            lines = f.readlines()
-    except PermissionError:
-        return                        # /etc/... is chmod 600, our uid can't read
-    kept = [l for l in lines if not l.startswith("KITE_ACCESS_TOKEN=")]
-    kept.append(f"KITE_ACCESS_TOKEN={token}\n")
+        with open(KITE_TOKEN_FILE, "w") as f:
+            f.write(token)
+        os.chmod(KITE_TOKEN_FILE, 0o600)
+    except Exception as e:
+        # Surface persist failures in logs so we don't silently rot again
+        print(f"⚠️  Could not persist Kite token to {KITE_TOKEN_FILE}: {e}",
+              flush=True)
+
+
+def _load_persisted_kite_token():
+    """On boot, restore the last-known access_token from disk if any."""
+    if os.environ.get("KITE_ACCESS_TOKEN"):
+        return                         # env-var wins
     try:
-        with open(env_file, "w") as f:
-            f.writelines(kept)
-    except PermissionError:
-        pass
+        if os.path.exists(KITE_TOKEN_FILE):
+            with open(KITE_TOKEN_FILE) as f:
+                tok = f.read().strip()
+            if tok:
+                os.environ["KITE_ACCESS_TOKEN"] = tok
+                print(f"↺ Restored Kite access_token from {KITE_TOKEN_FILE}",
+                      flush=True)
+    except Exception as e:
+        print(f"⚠️  Could not read {KITE_TOKEN_FILE}: {e}", flush=True)
+
+
+_load_persisted_kite_token()
 
 
 # ── BSE (SENSEX is a BSE index, not on NSE) ──────────────────────────
