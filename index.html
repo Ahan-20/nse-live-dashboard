@@ -647,11 +647,14 @@
   <!-- TAB: POSITIONS -->
   <div id="tab-positions" class="code-block" style="display:none;padding:16px">
     <div style="margin-bottom:12px">
-      <div style="color:var(--purple);font-size:12px;font-weight:700;letter-spacing:1px">📊 BULL PUT SPREAD · POSITION TRACKER</div>
+      <div style="color:var(--purple);font-size:12px;font-weight:700;letter-spacing:1px">📊 POSITION TRACKER · ALL STRATEGIES</div>
       <div style="color:var(--dim);font-size:10px;margin-top:3px;max-width:840px;line-height:1.55">
-        Log each spread once. Paste the <b>current spread cost</b> (the price to buy it back, from Sensibull or your broker)
-        whenever you check — page instantly shows % profit and fires the 50% / 70% / SL banner.
-        All positions stay in your browser (localStorage); nothing is sent to a server.
+        Log every trade — whatever TEF-90 recommends: <b style="color:var(--green)">Bull Put Spread</b> ·
+        <b style="color:var(--red)">Bear Call Spread</b> · <b style="color:var(--amber)">Short Strangle</b> ·
+        <b style="color:var(--cyan)">Iron Condor</b>. Pick the strategy in the form → enter your legs once →
+        current spread cost auto-refreshes every 30 s from Kite (no more Sensibull).
+        Page fires the <b>50 % / 70 % / SL</b> banner when thresholds hit. Stored in your browser;
+        nothing leaves your device.
       </div>
       <div id="pos-alert" style="display:none;margin-top:10px"></div>
     </div>
