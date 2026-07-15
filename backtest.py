@@ -134,7 +134,7 @@ def slope_pct(series, lookback=5):
 # ── data ─────────────────────────────────────────────────────────────
 # Clean ticker renames: current symbol -> predecessor ticker(s) whose pre-rename
 # history we stitch on. Only pure renames (no price adjustment) — NOT demergers.
-ALIASES = {"ETERNAL": ["ZOMATO"]}
+ALIASES = {"ETERNAL": ["ZOMATO"], "GMRAIRPORT": ["GMRINFRA"]}
 
 
 def load(symbol):

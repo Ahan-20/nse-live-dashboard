@@ -1585,6 +1585,7 @@ function renderTefPicks(p){
 }
 
 // Pre-fill the Positions form with a TEF-90 pick and jump there.
+// p may include _symbol_override + _lotsize_override for per-stock watchlist picks.
 function logTefPickToPositions(p){
   const posTab = [...document.querySelectorAll('.tab')].find(t=>t.textContent.includes('Positions'));
   showTab('positions', posTab);
@@ -1592,11 +1593,12 @@ function logTefPickToPositions(p){
   const wrap = g('pos-form-wrap'); if(wrap) wrap.open = true;
   g('pos-strategy').value = p.strategy;
   posStrategyChanged();
-  g('pos-symbol').value = 'NIFTY';
+  g('pos-symbol').value = p._symbol_override || p.symbol || 'NIFTY';
   g('pos-expiry').value = p.expiry;
   g('pos-credit').value = p.net_credit;
-  // NIFTY lot size (as of 2026) is 75. Auto-fill; user can adjust.
-  g('pos-lotsize').value = 75;
+  // Lot size: override if watchlist knows it; else fall back to NIFTY's 75
+  // (user can always edit before saving).
+  g('pos-lotsize').value = p._lotsize_override || p.lot_size || 75;
   g('pos-entry').value = new Date().toISOString().slice(0,10);
   for(const leg of p.legs){
     const el = g('pos-leg-'+leg.leg_id);
@@ -1740,11 +1742,107 @@ function renderTefScore(d){
   </div>`;
 
   document.getElementById('tef-content').innerHTML = header + stateRow + factorList + decisionTable +
-    `<div style="font-size:10px;color:var(--dim);margin-top:10px;line-height:1.5">
+    `<div id="tef-watchlist-slot" style="margin-top:14px"></div>
+     <div style="font-size:10px;color:var(--dim);margin-top:10px;line-height:1.5">
       <b style="color:var(--amber)">Auto-skip overrides:</b> gap open ≥ 1% OR RSI &lt; 30 / &gt; 70 → force SKIP regardless of score.
       Manual ticks reset each morning · auto-refresh 60s ·
       NIFTY historicals computed on NIFTYBEES (tracks NIFTY 50 1:1 in %).
     </div>`;
+
+  // Kick off watchlist fetch (per-stock TEF scoring for user's F&O universe)
+  setTimeout(fetchAndRenderWatchlist, 200);
+}
+
+async function fetchAndRenderWatchlist(){
+  const slot = document.getElementById('tef-watchlist-slot');
+  if(!slot) return;
+  slot.innerHTML = `<div style="font-size:10px;color:var(--dim)">Loading watchlist scores…</div>`;
+  try{
+    const r = await fetch('/api/tef-watchlist', {cache:'no-store'});
+    const d = await r.json();
+    if(!d.ok){ slot.innerHTML = `<div style="font-size:10px;color:var(--amber)">Watchlist error: ${d.error||'unknown'}</div>`; return; }
+    slot.innerHTML = renderWatchlist(d.rows);
+  }catch(e){ slot.innerHTML = `<div style="font-size:10px;color:var(--amber)">Watchlist fetch failed: ${e.message}</div>`; }
+}
+
+function renderWatchlist(rows){
+  const stratMeta = {
+    'SHORT_STRANGLE':  {emoji:'🎯', label:'SHORT STRANGLE',  color:'var(--green)'},
+    'IRON_CONDOR':     {emoji:'🦅', label:'IRON CONDOR',     color:'var(--cyan)'},
+    'BULL_PUT_SPREAD': {emoji:'📈', label:'BULL PUT',        color:'var(--green)'},
+    'BEAR_CALL_SPREAD':{emoji:'📉', label:'BEAR CALL',       color:'var(--red)'},
+    'SKIP':            {emoji:'⛔', label:'SKIP',            color:'var(--amber)'},
+  };
+  const mktMeta = {sideways:'var(--green)', trend_up:'var(--cyan)', trend_down:'var(--red)', mixed:'var(--amber)'};
+  const nActionable = rows.filter(r => !r.error && r.strategy !== 'SKIP').length;
+
+  const tbody = rows.map(r => {
+    if(r.error){
+      return `<tr><td colspan="8" style="color:var(--dim);font-size:10px">${r.symbol}: ${r.error}</td></tr>`;
+    }
+    const sm = stratMeta[r.strategy] || stratMeta.SKIP;
+    const dayCol  = r.day_pchg >= 0 ? 'var(--green)' : 'var(--red)';
+    const emaCol  = Math.abs(r.dist_from_ema_pct) < 3 ? 'var(--green)' : 'var(--amber)';
+    const adxCol  = r.adx < 20 ? 'var(--green)' : 'var(--amber)';
+    const rsiCol  = r.rsi >= 40 && r.rsi <= 60 ? 'var(--green)' : 'var(--amber)';
+    const scoreCol = r.score >= 5 ? 'var(--green)' : r.score >= 3 ? 'var(--amber)' : 'var(--red)';
+    const canPick = r.strategy === 'SHORT_STRANGLE' || r.strategy === 'IRON_CONDOR';
+    const actionBtn = canPick
+      ? `<span onclick="loadPickForSymbol('${r.symbol}','${r.strategy==='SHORT_STRANGLE'?'ss':'ic'}')" style="color:var(--purple);cursor:pointer;font-weight:700">📊 Log</span>`
+      : (r.strategy === 'BULL_PUT_SPREAD'
+          ? `<a href="#" onclick="event.preventDefault();document.querySelector('.tab[onclick*=bullput]').click()" style="color:var(--cyan);text-decoration:none">Bull Put →</a>`
+          : r.strategy === 'BEAR_CALL_SPREAD'
+              ? `<span style="color:var(--dim)">bearish setup</span>`
+              : `<span style="color:var(--dim)">—</span>`);
+    return `<tr>
+      <td style="font-weight:700;color:#e2e8f0">${r.symbol}</td>
+      <td style="text-align:right">₹${r.ltp}</td>
+      <td style="text-align:right;color:${dayCol};font-weight:700">${r.day_pchg>=0?'+':''}${r.day_pchg}%</td>
+      <td style="text-align:right;color:${emaCol}">${r.dist_from_ema_pct>=0?'+':''}${r.dist_from_ema_pct}%</td>
+      <td style="text-align:right;color:${adxCol}">${r.adx}</td>
+      <td style="text-align:right;color:${rsiCol}">${r.rsi}</td>
+      <td style="text-align:center;color:${mktMeta[r.market]||'var(--dim)'};font-weight:700;text-transform:uppercase;font-size:10px">${r.market}</td>
+      <td style="text-align:center;color:${scoreCol};font-weight:700">${r.score}/${r.score_max}</td>
+      <td style="text-align:center;color:${sm.color};font-weight:700;white-space:nowrap">${sm.emoji} ${sm.label}</td>
+      <td style="text-align:center">${actionBtn}</td>
+    </tr>`;
+  }).join('');
+  return `
+    <div style="border:1px solid var(--border);border-radius:6px;padding:12px;background:#0a1420">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+        <div>
+          <span style="color:var(--amber);font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase">📌 Watchlist · ${rows.length} stocks</span>
+          <span style="color:var(--dim);font-size:10px;margin-left:8px">${nActionable} actionable today</span>
+        </div>
+        <span style="color:var(--dim);font-size:9px">Per-stock TEF-90 scoring · edit <code style="color:var(--cyan)">watchlist.json</code> to change</span>
+      </div>
+      <table class="matrix" style="width:100%;font-size:11px">
+        <thead><tr>
+          <th>Stock</th>
+          <th style="text-align:right">LTP</th>
+          <th style="text-align:right">Day %</th>
+          <th style="text-align:right" title="Distance from 200 EMA — |&lt;3%| = sideways">200 EMA</th>
+          <th style="text-align:right" title="ADX(14) — &lt;20 = ranging">ADX</th>
+          <th style="text-align:right" title="RSI(14) — 40-60 = neutral">RSI</th>
+          <th style="text-align:center">Market</th>
+          <th style="text-align:center">Score</th>
+          <th style="text-align:center">Strategy</th>
+          <th style="text-align:center">Action</th>
+        </tr></thead>
+        <tbody>${tbody}</tbody>
+      </table>
+    </div>`;
+}
+
+async function loadPickForSymbol(symbol, strat){
+  // For per-stock Iron Condor / Short Strangle, hit /api/tef-picks with symbol.
+  // (When wired for stocks, that endpoint takes ?symbol=SYM&strategy=ic|ss.)
+  try{
+    const r = await fetch('/api/tef-picks?symbol='+symbol+'&strategy='+strat, {cache:'no-store'});
+    const d = await r.json();
+    if(!d.ok){ alert('Picks unavailable for '+symbol+': '+(d.error||'unknown')); return; }
+    logTefPickToPositions({...d.picks, _symbol_override: symbol});
+  }catch(e){ alert('Fetch failed: '+e.message); }
 }
 
 // ─── POSITION TRACKER (multi-strategy) ──────────────────────────────

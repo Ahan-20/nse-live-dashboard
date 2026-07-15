@@ -1342,6 +1342,141 @@ def cached_tef_score():
     return d
 
 
+# ── TEF-90 watchlist: per-stock scoring for the user's chosen F&O universe ──
+try:
+    with open(os.path.join(HERE, "watchlist.json")) as _f:
+        _wl = json.load(_f)
+        WATCHLIST_SYMBOLS = _wl.get("symbols", [])
+except Exception:
+    WATCHLIST_SYMBOLS = []
+
+
+_watchlist_cache = {"t": 0.0, "data": None}
+
+
+def _score_stock(sym, live_lookup=None):
+    """Per-stock TEF-90 factors + strategy recommendation.
+    `live_lookup` is an optional {symbol: {ltp, prev_price, perChange}} dict
+    shared across many symbols to avoid re-fetching gainer/loser feeds."""
+    try:
+        bars = bt.load(sym)
+    except Exception as e:
+        return {"symbol": sym, "error": f"load failed: {e}"}
+    if len(bars) < 220:
+        return {"symbol": sym, "error": f"only {len(bars)} bars (need 220+)"}
+
+    o = [b["o"] for b in bars]; c = [b["c"] for b in bars]
+    h = [b["h"] for b in bars]; l = [b["l"] for b in bars]
+    e200 = bt.ema(c, 200)
+    a = bt.atr(h, l, c, 14)
+    rsiv = bt.rsi(c, 14)
+
+    last_close = c[-1]
+    ltp = last_close
+    day_pchg = 0.0
+    if live_lookup and sym in live_lookup:
+        m = live_lookup[sym]
+        ltp = float(m.get("ltp") or last_close)
+        day_pchg = float(m.get("perChange") or 0)
+
+    dist_pct = (ltp - e200[-1]) / e200[-1] * 100 if e200[-1] else 0
+    adx = _adx14(h, l, c)
+    slope5 = ((c[-1] - c[-6]) / c[-6] * 100) if len(c) >= 6 else 0
+    last_ranges = [(h[i] - l[i]) for i in range(-3, 0)]
+    avg_range = sum(last_ranges) / 3
+    def body_ratio(i):
+        rng = h[i] - l[i]
+        return (abs(c[i] - o[i]) / rng) if rng > 0 else 0
+    med_body = sorted(body_ratio(i) for i in range(-5, 0))[2]
+    rsi = rsiv[-1]
+
+    # Factor checks (mirror TEF-90 index-level)
+    near_ema = abs(dist_pct) < 3.0
+    no_trend = adx < 20 and abs(slope5) < 2.5
+    range_bound = avg_range < 1.2 * a[-1]
+    small_cndl = med_body < 0.55
+    no_gap = abs(day_pchg) < 1.0
+    rsi_neutral = 40 <= rsi <= 60
+
+    # Market-type classifier per stock
+    if near_ema and no_trend and rsi_neutral:
+        mkt = "sideways"
+    elif dist_pct > 3 and slope5 > 1 and adx > 20:
+        mkt = "trend_up"
+    elif dist_pct < -3 and slope5 < -1 and adx > 20:
+        mkt = "trend_down"
+    else:
+        mkt = "mixed"
+
+    auto_score = sum([near_ema, no_trend, range_bound, small_cndl, no_gap, rsi_neutral])
+
+    # Strategy recommendation
+    if abs(day_pchg) >= 1:
+        strategy = "SKIP"; reason = f"gap {day_pchg:+.2f}% ≥ 1%"
+    elif rsi < 30 or rsi > 70:
+        strategy = "SKIP"; reason = f"RSI {rsi:.0f} extreme"
+    elif mkt == "sideways" and auto_score >= 5:
+        strategy = "SHORT_STRANGLE"; reason = "sideways + strong tech score"
+    elif mkt in ("sideways", "mixed") and auto_score >= 4:
+        strategy = "IRON_CONDOR"; reason = "range-bound-ish + decent score"
+    elif mkt == "trend_up":
+        strategy = "BULL_PUT_SPREAD"; reason = "trending up"
+    elif mkt == "trend_down":
+        strategy = "BEAR_CALL_SPREAD"; reason = "trending down"
+    else:
+        strategy = "SKIP"; reason = f"score {auto_score}/6 too low"
+
+    return {
+        "symbol": sym,
+        "ltp": round(ltp, 2),
+        "day_pchg": round(day_pchg, 2),
+        "dist_from_ema_pct": round(dist_pct, 2),
+        "adx": round(adx, 1),
+        "slope_5d": round(slope5, 2),
+        "rsi": round(rsi, 1),
+        "market": mkt,
+        "score": auto_score,
+        "score_max": 6,
+        "strategy": strategy,
+        "reason": reason,
+    }
+
+
+def build_tef_watchlist():
+    # ONE pair of NSE fetches, shared across every symbol in the watchlist
+    live = {}
+    for kind in ("gainers", "loosers"):
+        try:
+            d = nse_get("/api/live-analysis-variations?index=" + kind)
+            for r in ((d.get("FOSec") or {}).get("data", []) or []):
+                s = (r.get("symbol") or "").upper()
+                if s: live[s] = r
+        except Exception:
+            continue
+
+    rows = []
+    for sym in WATCHLIST_SYMBOLS:
+        try:
+            rows.append(_score_stock(sym, live_lookup=live))
+        except Exception as e:
+            rows.append({"symbol": sym, "error": str(e)})
+    # Sort: actionable strategies first, then by score
+    rank = {"SHORT_STRANGLE": 5, "IRON_CONDOR": 4, "BULL_PUT_SPREAD": 3,
+            "BEAR_CALL_SPREAD": 3, "SKIP": 0}
+    rows.sort(key=lambda r: (rank.get(r.get("strategy", ""), 0),
+                             r.get("score", 0)), reverse=True)
+    return {"ok": True, "rows": rows}
+
+
+def cached_watchlist():
+    now = time.time()
+    if _watchlist_cache["data"] and now - _watchlist_cache["t"] < 60:
+        return _watchlist_cache["data"]
+    d = build_tef_watchlist()
+    _watchlist_cache["data"], _watchlist_cache["t"] = d, now
+    return d
+
+
 # ── HTTP server ──────────────────────────────────────────────────────
 class Handler(BaseHTTPRequestHandler):
     def _send(self, code, body, ctype):
@@ -1425,9 +1560,16 @@ class Handler(BaseHTTPRequestHandler):
                     b"<a style='color:#00e5ff' href='/kite/login'>/kite/login</a> then.</p>"
                     b"</body></html>")
             return self._send(200, html, "text/html; charset=utf-8")
+        if self.path.startswith("/api/tef-watchlist"):
+            try:
+                rep = cached_watchlist()
+            except Exception as e:
+                rep = {"ok": False, "error": str(e)}
+            return self._send(200, json.dumps(rep).encode("utf-8"), "application/json")
         if self.path.startswith("/api/tef-picks"):
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             strat = (q.get("strategy", ["ic"])[0] or "ic").lower()
+            symbol = (q.get("symbol", ["NIFTY"])[0] or "NIFTY").upper()
             if strat not in ("ic", "ss"):
                 return self._send(200,
                     json.dumps({"ok": False, "error": f"unsupported strategy '{strat}'"}).encode(),
@@ -1437,23 +1579,38 @@ class Handler(BaseHTTPRequestHandler):
                     json.dumps({"ok": False, "error": "Kite not connected"}).encode(),
                     "application/json")
             try:
-                # Pass NIFTY spot from allIndices so we don't depend on Kite's
-                # underlying_value field (which is sometimes missing).
+                # Get a known-good spot to hand to the picker.
+                # NIFTY → allIndices. Stocks → live gainer/loser LTP; fall back
+                # to last DB close if the stock isn't a mover today.
                 spot_override = None
                 try:
-                    ai = nse_get("/api/allIndices")
-                    row = next((r for r in ai.get("data", []) if r.get("index") == "NIFTY 50"), None)
-                    if row: spot_override = float(row.get("last") or 0)
+                    if symbol == "NIFTY":
+                        ai = nse_get("/api/allIndices")
+                        row = next((r for r in ai.get("data", []) if r.get("index") == "NIFTY 50"), None)
+                        if row: spot_override = float(row.get("last") or 0)
+                    else:
+                        for kind in ("gainers", "loosers"):
+                            d = nse_get("/api/live-analysis-variations?index=" + kind)
+                            for r in ((d.get("FOSec") or {}).get("data", []) or []):
+                                if r.get("symbol", "").upper() == symbol:
+                                    spot_override = float(r.get("ltp") or 0)
+                                    break
+                            if spot_override: break
+                        if not spot_override:                     # fallback: last DB close
+                            bars = bt.load(symbol)
+                            if bars: spot_override = float(bars[-1]["c"])
                 except Exception:
                     pass
-                picks = INTRADAY.strategy_picks("NIFTY", strat, spot_override=spot_override)
-                # New: picks is either a full picks dict (has 'legs') or an
-                # {error: reason} dict — pass either through so UI can show it.
+                picks = INTRADAY.strategy_picks(symbol, strat, spot_override=spot_override)
                 if not picks:
                     rep = {"ok": False, "error": "option chain unavailable"}
                 elif isinstance(picks, dict) and "error" in picks and "legs" not in picks:
                     rep = {"ok": False, "error": picks["error"]}
                 else:
+                    # Attach the underlying symbol + lot size so the frontend
+                    # can pre-fill the Positions form correctly.
+                    picks["symbol"] = symbol
+                    picks["lot_size"] = LOT_SIZES.get(symbol)
                     rep = {"ok": True, "picks": picks}
             except Exception as e:
                 rep = {"ok": False, "error": f"{type(e).__name__}: {e}"}

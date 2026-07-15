@@ -1,0 +1,19 @@
+{
+  "note": "User's TEF-90 watchlist. Per-stock TEF scoring runs against these; results show on the TEF-90 tab under '📌 WATCHLIST'. Edit this file freely to add/remove — no code changes needed.",
+  "symbols": [
+    "PNB",
+    "IOC",
+    "IDFCFIRSTB",
+    "TATASTEEL",
+    "SAIL",
+    "BPCL",
+    "GMRAIRPORT",
+    "BHEL",
+    "GAIL",
+    "ONGC",
+    "BANKBARODA"
+  ],
+  "aliases": {
+    "GMRAIRPORT": ["GMRINFRA"]
+  }
+}
